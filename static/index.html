@@ -2334,78 +2334,73 @@
             
             // Add actor (human or AI)
             function addActor(type, defaultName, x, y) {
-                const id = `${type}-${nextId++}`;
-                const element = document.createElement('div');
-                element.className = `actor ${type}`;
-                element.id = id;
-                element.innerHTML = defaultName;
-                element.style.left = `${x}px`;
-                element.style.top = `${y}px`;
-                
-                const deleteBtn = document.createElement('div');
-                deleteBtn.className = 'delete-button';
-                deleteBtn.innerHTML = '×';
-                deleteBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    removeActor(id);
-                });
-                
-                element.appendChild(deleteBtn);
-                canvas.appendChild(element);
-                
-                const actor = {
-                    id,
-                    type,
-                    name: defaultName,
-                    description: '',
-                    systemPrompt: '',
-                    initialPrompt: '',
-                    element
-                };
-                
-                actors.push(actor);
-                
-                // Make element draggable
-                jsPlumbInstance.draggable(id, {
-                    containment: 'canvas',
-                    start: () => { isDragging = true; },
-                    stop: () => { 
-                        setTimeout(() => { isDragging = false; }, 10);
-                        jsPlumbInstance.repaintEverything();
-                    }
-                });
-                
-                // Make element selectable
-                element.addEventListener('click', () => {
-                    if (!isDragging && !isConnecting) {
-                        selectElement(actor);
-                    }
-                });
-                
-                // Configure endpoints properly
-                jsPlumbInstance.addEndpoint(id, {
-                    anchors: ["Right"], 
-                    isSource: true,
-                    isTarget: false,
-                    connector: ["Bezier", { curviness: 50 }],
-                    maxConnections: -1,
-                    connectorStyle: { stroke: "#456", strokeWidth: 2 },
-                    connectorHoverStyle: { stroke: "#c61", strokeWidth: 3 },
-                    endpointStyle: { fill: "#456", radius: 5 },
-                    endpointHoverStyle: { fill: "#c61", radius: 7 }
-                });
-                
-                jsPlumbInstance.addEndpoint(id, {
-                    anchors: ["Left"],
-                    isSource: false,
-                    isTarget: true, 
-                    maxConnections: -1,
-                    endpointStyle: { fill: "#456", radius: 5 },
-                    endpointHoverStyle: { fill: "#c61", radius: 7 }
-                });
-                
-                return actor;
-            }
+    const id = `${type}-${nextId++}`;
+    const element = document.createElement('div');
+    element.className = `actor ${type}`;
+    element.id = id;
+    element.innerHTML = defaultName;
+    element.style.left = `${x}px`;
+    element.style.top = `${y}px`;
+    
+    const deleteBtn = document.createElement('div');
+    deleteBtn.className = 'delete-button';
+    deleteBtn.innerHTML = '×';
+    deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeActor(id);
+    });
+    
+    element.appendChild(deleteBtn);
+    canvas.appendChild(element);
+    
+    const actor = {
+        id,
+        type,
+        name: defaultName,
+        description: '',
+        systemPrompt: '',
+        initialPrompt: '',
+        element
+    };
+    
+    actors.push(actor);
+    
+    // Make element draggable
+    jsPlumbInstance.draggable(id, {
+        containment: 'canvas',
+        start: () => { isDragging = true; },
+        stop: () => { 
+            setTimeout(() => { isDragging = false; }, 10);
+            jsPlumbInstance.repaintEverything();
+        }
+    });
+    
+    // Make element selectable
+    element.addEventListener('click', () => {
+        if (!isDragging && !isConnecting) {
+            selectElement(actor);
+        }
+    });
+    
+    // Provide four endpoints (top, right, bottom, left) so that we can connect from any side.
+    const endpointOptions = {
+        maxConnections: -1,
+        connector: ["Bezier", { curviness: 50 }],
+        connectorStyle: { stroke: "#456", strokeWidth: 2 },
+        connectorHoverStyle: { stroke: "#c61", strokeWidth: 3 },
+        endpointStyle: { fill: "#456", radius: 5 },
+        endpointHoverStyle: { fill: "#c61", radius: 7 },
+        isSource: true,
+        isTarget: true
+    };
+    
+    ["Top", "Right", "Bottom", "Left"].forEach(anchor => {
+        jsPlumbInstance.addEndpoint(id, { anchor }, endpointOptions);
+    });
+    
+    return actor;
+}
+
             
             // Add group
             function addGroup(defaultName, x, y, width, height) {
