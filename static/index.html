@@ -1,0 +1,2801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PAIA Workflow Designer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsPlumb/2.15.6/js/jsplumb.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        .sidebar {
+            width: 300px;
+            background-color: #fff;
+            border-right: 1px solid #ddd;
+            padding: 15px;
+            overflow-y: auto;
+        }
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            overflow: auto;
+        }
+        #canvas {
+            position: relative;
+            width: 2000px;
+            height: 1500px;
+            background-color: #fff;
+            background-image: 
+                linear-gradient(rgba(0, 0, 0, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 0, 0, 0.1) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        .actor {
+            position: absolute;
+            width: 120px;
+            height: 80px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: move;
+            color: white;
+            text-align: center;
+            font-weight: bold;
+            user-select: none;
+        }
+        .human {
+            background-color: #3498db;
+        }
+        .ai {
+            background-color: #2ecc71;
+        }
+        .selected {
+            box-shadow: 0 0 0 3px #f39c12;
+        }
+        .group {
+            position: absolute;
+            background-color: rgba(255, 255, 255, 0.7);
+            border: 2px dashed #777;
+            border-radius: 12px;
+            padding: 10px;
+        }
+        .panel {
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+        }
+        .panel h3 {
+            margin-top: 0;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 5px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+        .interaction {
+            background-color: #f8f8f8;
+            padding: 5px;
+            margin-bottom: 5px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+        }
+        .interaction button {
+            margin-left: 5px;
+            padding: 2px 6px;
+            background-color: #e74c3c;
+        }
+        .controls {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background-color: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .tooltip {
+            display: none !important; 
+            position: absolute;
+            background-color: black;
+            color: white;
+            padding: 5px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 1000;
+            pointer-events: none;
+        }
+        #export-json {
+            background-color: #2ecc71;
+        }
+        #run-simulation {
+            background-color: #9b59b6;
+        }
+        .delete-button {
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            width: 22px;
+            height: 22px;
+            background-color: #e74c3c;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 14px;
+            z-index: 100;
+        }
+        
+        /* Simulation Panel Styles */
+        .simulation-panel {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 600px;
+            height: 100vh;
+            background-color: white;
+            box-shadow: -2px 0 5px rgba(0,0,0,0.2);
+            z-index: 1001;
+            display: flex;
+            flex-direction: column;
+            transform: translateX(100%);
+            transition: transform 0.3s ease-in-out;
+        }
+        .simulation-panel.active {
+            transform: translateX(0);
+        }
+        .simulation-header {
+            padding: 15px;
+            background-color: #9b59b6;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .simulation-header h2 {
+            margin: 0;
+        }
+        .simulation-header button {
+            background-color: transparent;
+            border: 1px solid white;
+            margin: 0;
+        }
+        .simulation-config {
+            padding: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .simulation-tabs {
+            display: flex;
+            background-color: #f1f1f1;
+            border-bottom: 1px solid #ddd;
+        }
+        .simulation-tab {
+            padding: 10px 15px;
+            cursor: pointer;
+            background-color: #f1f1f1;
+            border: none;
+            outline: none;
+        }
+        .simulation-tab.active {
+            background-color: white;
+            border-bottom: 2px solid #9b59b6;
+            font-weight: bold;
+        }
+        .simulation-tab-content {
+            display: none;
+            flex: 1;
+            overflow-y: auto;
+        }
+        .simulation-tab-content.active {
+            display: block;
+        }
+        .simulation-log {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            background-color: #f8f8f8;
+            max-height: calc(100vh - 200px);
+        }
+        .conversation-selector {
+            padding: 10px;
+            background-color: #f8f8f8;
+            border-bottom: 1px solid #ddd;
+        }
+        .conversation-history {
+            padding: 15px;
+            overflow-y: auto;
+            background-color: white;
+            max-height: calc(100vh - 250px);
+        }
+        .log-entry {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            background-color: white;
+            border-left: 4px solid #3498db;
+        }
+        .log-entry.status {
+            border-left-color: #f39c12;
+            background-color: #fef9e7;
+        }
+        .log-entry.error {
+            border-left-color: #e74c3c;
+            background-color: #fadbd8;
+        }
+        .log-entry.round {
+            border-left-color: #9b59b6;
+            background-color: #f4ecf7;
+            font-weight: bold;
+            padding: 10px;
+            text-align: center;
+        }
+        .log-entry.message {
+            border-left-color: #3498db;
+        }
+        .log-entry.response {
+            border-left-color: #2ecc71;
+        }
+        .log-entry .header {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .log-entry .content {
+            white-space: pre-wrap;
+        }
+        .human-input-form {
+            padding: 15px;
+            background-color: #eee;
+            border-top: 1px solid #ddd;
+        }
+        .human-input-form textarea {
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        .message-bubble {
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+        .message-bubble.sender {
+            background-color: #DCF8C6;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+        .message-bubble.receiver {
+            background-color: #F3F3F3;
+            align-self: flex-start;
+        }
+        .conversation-container {
+            display: flex;
+            flex-direction: column;
+        }
+        .message-header {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #555;
+        }
+        .controlled-humans {
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-bottom: 1px solid #ddd;
+        }
+        .actor-control {
+            margin-right: 10px;
+            margin-bottom: 5px;
+            display: inline-block;
+        }
+        .direct-input {
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-top: 1px solid #ddd;
+            display: none;
+        }
+        .direct-input.active {
+            display: block;
+        }
+        .direct-input select {
+            margin-bottom: 10px;
+        }
+        
+        .replay-controls {
+            padding: 15px;
+            background-color: #e8f5e9;
+            border-bottom: 1px solid #a5d6a7;
+            display: none;
+        }
+        .replay-controls.active {
+            display: block;
+        }
+        .replay-buttons {
+            display: flex;
+            margin-bottom: 10px;
+        }
+        .replay-buttons button {
+            margin-right: 5px;
+            background-color: #4caf50;
+        }
+        .replay-buttons button:hover {
+            background-color: #388e3c;
+        }
+        .replay-buttons button.reset {
+            background-color: #f44336;
+        }
+        .replay-buttons button.reset:hover {
+            background-color: #d32f2f;
+        }
+        .replay-progress {
+            margin-top: 10px;
+        }
+        .replay-progress-bar {
+            width: 100%;
+            height: 10px;
+            background-color: #e0e0e0;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        .replay-progress-fill {
+            height: 100%;
+            background-color: #4caf50;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        .replay-speed {
+            margin-top: 10px;
+        }
+        .replay-speed select {
+            margin-left: 10px;
+            width: 100px;
+        }
+        
+        .rounds-selector {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+        .round-btn {
+            padding: 5px 10px;
+            background-color: #f1f1f1;
+            color: #333;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .round-btn:hover {
+            background-color: #e1e1e1;
+        }
+        .round-btn.active {
+            background-color: #3498db;
+            color: white;
+            border-color: #2980b9;
+        }
+        #rounds {
+            width: 60px;
+            margin-left: 5px;
+        }
+        .simulation-options-heading {
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .generation-options {
+            margin-bottom: 10px;
+        }
+        
+        .generation-options > div {
+            margin-bottom: 5px;
+        }
+        
+        #generate-schema {
+            margin-top: 5px;
+            background-color: #8e44ad;
+        }
+        
+        #generate-schema:hover {
+            background-color: #7d3c98;
+        }
+        
+        #generate-schema:disabled {
+            background-color: #d1bbd7;
+        }
+        
+        .option-description {
+            font-size: 12px;
+            color: #666;
+            margin-left: 20px;
+            margin-bottom: 5px;
+        }
+        
+        .status-message {
+            margin-top: 5px;
+            font-size: 13px;
+            font-style: italic;
+            min-height: 20px;
+        }
+        
+        .status-message.success {
+            color: #27ae60;
+        }
+        
+        .status-message.error {
+            color: #e74c3c;
+        }
+        
+        .status-message.loading {
+            color: #3498db;
+        }
+        
+        .prompt-preview {
+            margin-top: 10px;
+            padding: 8px;
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+        
+        .file-import-message {
+            font-size: 12px;
+            color: #777;
+            font-style: italic;
+            margin-top: 5px;
+        }
+        
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            z-index: 1000;
+            display: none;
+        }
+        
+        .dialog {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            z-index: 1001;
+            max-width: 500px;
+            width: 90%;
+        }
+        
+        .dialog h2 {
+            margin-top: 0;
+        }
+        
+        .progress-bar-container {
+            width: 100%;
+            height: 20px;
+            background-color: #eee;
+            border-radius: 10px;
+            margin: 10px 0;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background-color: #3498db;
+            border-radius: 10px;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        
+        .import-export-buttons .tooltip {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            white-space: nowrap;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.2s;
+            margin-bottom: 5px;
+        }
+        .button-with-tooltip {
+            position: relative;
+        }
+        .button-with-tooltip:hover .tooltip {
+            display: block !important;
+            visibility: visible;
+            opacity: 1;
+        }
+        button + div {
+            display: none;
+        }
+        button:hover + div {
+            display: block;
+        }
+        
+        .actor .connect-point {
+            display: none;
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background-color: #3498db;
+            border-radius: 50%;
+            cursor: pointer;
+            z-index: 10;
+            box-shadow: 0 0 5px rgba(0,0,0,0.3);
+        }
+
+        .actor:hover .connect-point {
+            display: block;
+        }
+
+        .actor .connect-point.top {
+            top: -6px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .actor .connect-point.right {
+            right: -6px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .actor .connect-point.bottom {
+            bottom: -6px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .actor .connect-point.left {
+            left: -6px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .actor .connect-point:hover {
+            background-color: #e74c3c;
+            transform: scale(1.2) translateX(-50%);
+        }
+
+        .actor .connect-point.right:hover, 
+        .actor .connect-point.left:hover {
+            transform: scale(1.2) translateY(-50%);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="panel">
+                <h3>Scenario Settings</h3>
+                <label for="scenario-name">Name:</label>
+                <input type="text" id="scenario-name" placeholder="Enter scenario name">
+                
+                <label for="scenario-desc">Description:</label>
+                <textarea id="scenario-desc" placeholder="Describe the scenario"></textarea>
+            </div>
+            
+            <div class="panel">
+                <h3>AI Generation</h3>
+                <div class="generation-options">
+                    <div>
+                        <label>
+                            <input type="radio" name="generation-mode" value="none" checked> Manual Design
+                        </label>
+                        <div class="option-description">Manually create all aspects of the workflow</div>
+                    </div>
+                    <div>
+                        <label>
+                            <input type="radio" name="generation-mode" value="prompts-only"> Auto-Generate Prompts
+                        </label>
+                        <div class="option-description">Generate system prompts from scenario description</div>
+                    </div>
+                    <div>
+                        <label>
+                            <input type="radio" name="generation-mode" value="full-schema"> Generate Full Schema
+                        </label>
+                        <div class="option-description">Generate actors, connections and prompts</div>
+                    </div>
+                </div>
+                <button id="generate-prompts" disabled>Generate Prompts</button>
+                <button id="generate-schema" disabled>Generate Full Schema</button>
+                <div id="generation-status" class="status-message"></div>
+            </div>
+            
+            <div class="panel">
+                <h3>Schema Management</h3>
+                <div class="button-with-tooltip">
+                    <button id="export-schema">Export Schema</button>
+                    <div class="tooltip">Save the current workflow design</div>
+                </div>
+                <div class="button-with-tooltip">
+                    <button id="import-schema">Import Schema</button>
+                    <div class="tooltip">Load a previously saved workflow design</div>
+                </div>
+                <div id="schema-import-message" class="file-import-message"></div>
+            </div>
+            
+            <div class="panel">
+                <h3>Add Elements</h3>
+                <button id="add-human">Add Human</button>
+                <button id="add-ai">Add AI</button>
+                <button id="add-group">Add Group</button>
+            </div>
+            
+            <div class="panel">
+                <h3>Element Properties</h3>
+                <div id="properties-panel">
+                    <p>Select an element to edit its properties</p>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <h3>Interaction Flow</h3>
+                <div id="interactions-list"></div>
+                <button id="add-interaction">Add Interaction</button>
+            </div>
+            
+            <div class="panel">
+                <h3>Actions</h3>
+                <div class="button-with-tooltip">
+                    <button id="export-json">Export Config</button>
+                    <div class="tooltip">Export configuration as JSON</div>
+                </div>
+                <div class="button-with-tooltip">
+                    <button id="run-simulation">Run Simulation</button>
+                    <div class="tooltip">Run a new simulation with this configuration</div>
+                </div>
+                <div class="button-with-tooltip">
+                    <button id="export-simulation" style="background-color: #e67e22;">Export Simulation</button>
+                    <div class="tooltip">Export current simulation results</div>
+                </div>
+                <div class="button-with-tooltip">
+                    <button id="import-simulation" style="background-color: #e67e22;">Import Simulation</button>
+                    <div class="tooltip">Load a previously exported simulation</div>
+                </div>
+                <div id="simulation-import-message" class="file-import-message"></div>
+                <input type="file" id="schema-file-input" style="display: none;" accept=".json">
+                <input type="file" id="simulation-file-input" style="display: none;" accept=".json">
+                <div id="simulation-options" style="display: none; margin-top: 10px;">
+                    <h4 class="simulation-options-heading">Simulation Settings</h4>
+                    <div>
+                        <label for="api-key">Gemini API Key:</label>
+                        <input type="text" id="api-key" placeholder="Enter your Gemini API key">
+                    </div>
+                    
+                    <div>
+                        <label for="rounds">Number of Rounds:</label>
+                        <div class="rounds-selector">
+                            <button class="round-btn" data-rounds="1">1</button>
+                            <button class="round-btn" data-rounds="2">2</button>
+                            <button class="round-btn" data-rounds="3">3</button>
+                            <button class="round-btn" data-rounds="5">5</button>
+                            <input type="number" id="rounds" min="1" max="10" value="2" placeholder="Custom">
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label>
+                            <input type="checkbox" id="simulate-humans"> Simulate All Humans
+                        </label>
+                    </div>
+                    
+                    <div id="human-actors-control" style="display: none; margin-top: 10px; padding: 5px; border: 1px solid #ddd;">
+                        <p>Select humans to control directly:</p>
+                        <div id="human-actors-list"></div>
+                    </div>
+                    
+                    <button id="start-simulation">Start Simulation</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="canvas-container">
+            <div id="canvas"></div>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <button id="zoom-in">+</button>
+        <button id="zoom-out">-</button>
+        <button id="reset-zoom">Reset</button>
+    </div>
+    
+    <div class="simulation-panel" id="simulation-panel">
+        <div class="simulation-header">
+            <h2>Simulation</h2>
+            <button id="close-simulation">Close</button>
+        </div>
+        
+        <div class="replay-controls" id="replay-controls">
+            <h3>Simulation Replay</h3>
+            <div class="replay-buttons">
+                <button id="replay-step">Step</button>
+                <button id="replay-play">Play</button>
+                <button id="replay-pause" style="display:none">Pause</button>
+                <button id="replay-reset" class="reset">Reset</button>
+            </div>
+            <div class="replay-speed">
+                <label for="replay-speed-select">Speed:</label>
+                <select id="replay-speed-select">
+                    <option value="0.5">0.5x (Slow)</option>
+                    <option value="1" selected>1x (Normal)</option>
+                    <option value="2">2x (Fast)</option>
+                    <option value="5">5x (Very Fast)</option>
+                </select>
+            </div>
+            <div class="replay-progress">
+                <span id="replay-progress-text">0/0 messages</span>
+                <div class="replay-progress-bar">
+                    <div class="replay-progress-fill" id="replay-progress-fill"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="simulation-tabs">
+            <button class="simulation-tab active" data-tab="live">Live View</button>
+            <button class="simulation-tab" data-tab="history">Conversation History</button>
+            <button class="simulation-tab" data-tab="direct">Direct Input</button>
+        </div>
+        
+        <div class="simulation-tab-content active" id="tab-live">
+            <div class="simulation-log" id="simulation-log"></div>
+            <div class="human-input-form" id="human-input-form" style="display: none;">
+                <div id="human-input-prompt"></div>
+                <textarea id="human-input" placeholder="Enter your response..."></textarea>
+                <button id="submit-human-input">Submit</button>
+            </div>
+        </div>
+        
+        <div class="simulation-tab-content" id="tab-history">
+            <div class="conversation-selector">
+                <label for="conversation-pair">Select conversation:</label>
+                <select id="conversation-pair"></select>
+                <button id="refresh-history">Refresh</button>
+            </div>
+            <div class="conversation-history" id="conversation-history"></div>
+        </div>
+        
+        <div class="simulation-tab-content" id="tab-direct">
+            <div class="controlled-humans" id="controlled-humans-info">
+                <h3>Controlled Human Actors</h3>
+                <div id="controlled-humans-list">No human actors selected for direct control</div>
+            </div>
+            <div class="direct-input" id="direct-input">
+                <label for="direct-input-source">Send message as:</label>
+                <select id="direct-input-source"></select>
+                <label for="direct-input-target">To:</label>
+                <select id="direct-input-target"></select>
+                <textarea id="direct-input-message" placeholder="Enter your message..."></textarea>
+                <button id="send-direct-message">Send Message</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="overlay" id="overlay">
+        <div class="dialog" id="api-key-dialog">
+            <h2>API Key Required</h2>
+            <p>Please enter your Google Gemini API key to run the simulation:</p>
+            <input type="text" id="api-key-input" placeholder="Gemini API Key">
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="progress-bar"></div>
+            </div>
+            <p id="dialog-status">Waiting for API key...</p>
+            <button id="submit-api-key">Start Simulation</button>
+            <button id="cancel-dialog">Cancel</button>
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize jsPlumb
+            const jsPlumbInstance = jsPlumb.getInstance({
+                Container: 'canvas',
+                Connector: ['Bezier', { curviness: 50 }],
+                PaintStyle: { stroke: '#456', strokeWidth: 2 },
+                HoverPaintStyle: { stroke: '#c61', strokeWidth: 3 },
+                ConnectionOverlays: [
+                    ['Arrow', { location: 1, width: 10, length: 10 }]
+                ],
+                DragOptions: { cursor: 'pointer', zIndex: 2000 }
+            });
+
+            jsPlumbInstance.registerConnectionType("basic", {
+                paintStyle: { stroke: "#456", strokeWidth: 2 },
+                hoverPaintStyle: { stroke: "#c61", strokeWidth: 3 },
+                overlays: [
+                    ["Arrow", { location: 1, width: 10, length: 10 }]
+                ]
+            });
+            
+            // Initialize state
+            let actors = [];
+            let groups = [];
+            let interactions = [];
+            let selectedElement = null;
+            let nextId = 1;
+            let scale = 1;
+            let isDragging = false;
+            let isConnecting = false;
+            let connectSource = null;
+            let socket = null;
+            let currentSessionId = null;
+            
+            // DOM elements
+            const canvas = document.getElementById('canvas');
+            const propertiesPanel = document.getElementById('properties-panel');
+            const interactionsList = document.getElementById('interactions-list');
+            const runSimulation = document.getElementById('run-simulation');
+            const simulationOptions = document.getElementById('simulation-options');
+            const startSimulation = document.getElementById('start-simulation');
+            const simulationPanel = document.getElementById('simulation-panel');
+            const simulationLog = document.getElementById('simulation-log');
+            const closeSimulation = document.getElementById('close-simulation');
+            const humanInputForm = document.getElementById('human-input-form');
+            const humanInputPrompt = document.getElementById('human-input-prompt');
+            const humanInput = document.getElementById('human-input');
+            const submitHumanInput = document.getElementById('submit-human-input');
+            const overlay = document.getElementById('overlay');
+            const apiKeyDialog = document.getElementById('api-key-dialog');
+            const apiKeyInput = document.getElementById('api-key-input');
+            const submitApiKey = document.getElementById('submit-api-key');
+            const cancelDialog = document.getElementById('cancel-dialog');
+            const progressBar = document.getElementById('progress-bar');
+            const dialogStatus = document.getElementById('dialog-status');
+            
+            // Setup zoom controls
+            document.getElementById('zoom-in').addEventListener('click', () => {
+                scale *= 1.2;
+                applyZoom();
+            });
+            
+            document.getElementById('zoom-out').addEventListener('click', () => {
+                scale *= 0.8;
+                applyZoom();
+            });
+            
+            document.getElementById('reset-zoom').addEventListener('click', () => {
+                scale = 1;
+                applyZoom();
+            });
+            
+            function applyZoom() {
+                canvas.style.transform = `scale(${scale})`;
+                canvas.style.transformOrigin = '0 0';
+                jsPlumbInstance.setZoom(scale);
+            }
+            
+            // Add elements to canvas
+            document.getElementById('add-human').addEventListener('click', () => {
+                addActor('human', `Human ${nextId}`, 100, 100);
+            });
+            
+            document.getElementById('add-ai').addEventListener('click', () => {
+                addActor('ai', `AI ${nextId}`, 300, 100);
+            });
+            
+            document.getElementById('add-group').addEventListener('click', () => {
+                addGroup(`Group ${nextId}`, 400, 200, 300, 200);
+            });
+            
+            // Add interaction
+            // document.getElementById('add-interaction').addEventListener('click', () => {
+            //     if (actors.length < 2) {
+            //         alert('You need at least 2 actors to create an interaction');
+            //         return;
+            //     }
+                
+            //     const interaction = {
+            //         id: `interaction-${Date.now()}`,
+            //         source: actors[0].id,
+            //         target: actors[1].id
+            //     };
+                
+            //     interactions.push(interaction);
+            //     updateInteractionsList();
+            //     createConnection(interaction);
+            // });
+
+            document.getElementById('add-interaction').addEventListener('click', () => {
+                alert('To create connections, drag from one actor to another directly in the canvas.');
+            });
+            
+            // Export JSON
+            document.getElementById('export-json').addEventListener('click', () => {
+                const data = exportConfig();
+                
+                const jsonString = JSON.stringify(data, null, 2);
+                const blob = new Blob([jsonString], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${data.name.replace(/\s+/g, '-').toLowerCase()}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
+            
+            // Export schema (workflow configuration)
+            document.getElementById('export-schema').addEventListener('click', () => {
+                const data = exportConfig();
+                
+                const jsonString = JSON.stringify(data, null, 2);
+                const blob = new Blob([jsonString], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${data.name.replace(/\s+/g, '-').toLowerCase()}-schema.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
+            
+            // Import schema (workflow configuration)
+            document.getElementById('import-schema').addEventListener('click', () => {
+                document.getElementById('schema-file-input').click();
+            });
+            
+            // Handle schema file selection
+            document.getElementById('schema-file-input').addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const fileImportMessage = document.getElementById('schema-import-message');
+                fileImportMessage.textContent = `Importing: ${file.name}`;
+                
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const schema = JSON.parse(event.target.result);
+                        importSchema(schema);
+                        fileImportMessage.textContent = `Successfully imported: ${file.name}`;
+                        setTimeout(() => {
+                            fileImportMessage.textContent = '';
+                        }, 5000);
+                    } catch (err) {
+                        console.error('Error parsing schema file:', err);
+                        alert('Error parsing schema file. Please make sure it is a valid JSON file.');
+                        fileImportMessage.textContent = `Error importing: ${file.name}`;
+                    }
+                };
+                reader.readAsText(file);
+            });
+            
+            // Export simulation (with conversations)
+            document.getElementById('export-simulation').addEventListener('click', () => {
+                if (!currentSessionId) {
+                    alert('No active simulation to export. Please run a simulation first.');
+                    return;
+                }
+                
+                fetch(`/api/export-simulation/${currentSessionId}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            const jsonString = JSON.stringify(data.data, null, 2);
+                            const blob = new Blob([jsonString], { type: 'application/json' });
+                            const url = URL.createObjectURL(blob);
+                            
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${data.data.config.name.replace(/\s+/g, '-').toLowerCase()}-simulation.json`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                        } else {
+                            alert(`Error exporting simulation: ${data.error}`);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Error exporting simulation:', err);
+                        alert(`Error exporting simulation: ${err.message}`);
+                    });
+            });
+            
+            // Import simulation
+            document.getElementById('import-simulation').addEventListener('click', () => {
+                document.getElementById('simulation-file-input').click();
+            });
+            
+            // Handle simulation file selection
+            document.getElementById('simulation-file-input').addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const fileImportMessage = document.getElementById('simulation-import-message');
+                fileImportMessage.textContent = `Importing: ${file.name}`;
+                
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const simulation = JSON.parse(event.target.result);
+                        importSimulation(simulation);
+                        fileImportMessage.textContent = `Successfully imported: ${file.name}`;
+                        setTimeout(() => {
+                            fileImportMessage.textContent = '';
+                        }, 5000);
+                    } catch (err) {
+                        console.error('Error parsing simulation file:', err);
+                        alert('Error parsing simulation file. Please make sure it is a valid JSON file.');
+                        fileImportMessage.textContent = `Error importing: ${file.name}`;
+                    }
+                };
+                reader.readAsText(file);
+            });
+            
+            // Import a schema
+            function importSchema(schema) {
+                try {
+                    // Clear existing elements
+                    actors.forEach(actor => {
+                        removeActor(actor.id);
+                    });
+                    
+                    groups.forEach(group => {
+                        removeGroup(group.id);
+                    });
+                    
+                    actors = [];
+                    groups = [];
+                    interactions = [];
+                    selectedElement = null;
+                    nextId = 1;
+                    
+                    // Set scenario details
+                    document.getElementById('scenario-name').value = schema.name || 'Imported Scenario';
+                    document.getElementById('scenario-desc').value = schema.description || '';
+                    
+                    // Import actors
+                    if (schema.actors && Array.isArray(schema.actors)) {
+                        schema.actors.forEach(actorData => {
+                            const actor = addActor(
+                                actorData.type,
+                                actorData.name,
+                                actorData.position ? actorData.position.x : 100,
+                                actorData.position ? actorData.position.y : 100
+                            );
+                            
+                            // Set properties
+                            actor.description = actorData.description || '';
+                            actor.systemPrompt = actorData.systemPrompt || '';
+                            actor.initialPrompt = actorData.initialPrompt || '';
+                            
+                            // Update the next ID to avoid conflicts
+                            const idNum = parseInt(actor.id.split('-')[1]);
+                            if (idNum >= nextId) {
+                                nextId = idNum + 1;
+                            }
+                        });
+                    }
+                    
+                    // Import groups
+                    if (schema.groups && Array.isArray(schema.groups)) {
+                        schema.groups.forEach(groupData => {
+                            const group = addGroup(
+                                groupData.name,
+                                groupData.position ? groupData.position.x : 100,
+                                groupData.position ? groupData.position.y : 100,
+                                groupData.size ? groupData.size.width : 300,
+                                groupData.size ? groupData.size.height : 200
+                            );
+                            
+                            // Update the next ID to avoid conflicts
+                            const idNum = parseInt(group.id.split('-')[1]);
+                            if (idNum >= nextId) {
+                                nextId = idNum + 1;
+                            }
+                        });
+                    }
+                    
+                    // Import interactions
+                    if (schema.interactions && Array.isArray(schema.interactions)) {
+                        schema.interactions.forEach(interactionData => {
+                            const interaction = {
+                                id: `interaction-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+                                source: interactionData.source,
+                                target: interactionData.target
+                            };
+                            
+                            interactions.push(interaction);
+                            createConnection(interaction);
+                        });
+                    }
+                    
+                    // Update the interactions list
+                    updateInteractionsList();
+                    
+                    // Update the properties panel
+                    updatePropertiesPanel();
+                    
+                    alert('Schema imported successfully!');
+                } catch (err) {
+                    console.error('Error importing schema:', err);
+                    alert(`Error importing schema: ${err.message}`);
+                }
+            }
+            
+            // Import a simulation
+            function importSimulation(simulation) {
+                try {
+                    // First import the schema/configuration
+                    if (simulation.config) {
+                        importSchema(simulation.config);
+                    }
+                    
+                    // Then import the simulation data (conversations)
+                    fetch('/api/import-simulation', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            data: simulation
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            currentSessionId = data.session_id;
+                            
+                            // Show simulation panel
+                            simulationPanel.classList.add('active');
+                            simulationLog.innerHTML = '';
+                            addLogEntry('status', 'Imported simulation successfully');
+                            
+                            // If replay is available, activate replay controls
+                            if (data.replay_available) {
+                                activateReplayControls(data.replay_message_count);
+                                addLogEntry('status', 'Replay available - use controls to replay the simulation');
+                            } else {
+                                addLogEntry('status', 'Viewing imported conversations');
+                            }
+                            
+                            // Show the history tab
+                            document.querySelector('.simulation-tab[data-tab="history"]').click();
+                            
+                            // Load conversation history
+                            loadConversationHistory();
+                        } else {
+                            alert(`Error importing simulation: ${data.error}`);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Error importing simulation:', err);
+                        alert(`Error importing simulation: ${err.message}`);
+                    });
+                } catch (err) {
+                    console.error('Error importing simulation:', err);
+                    alert(`Error importing simulation: ${err.message}`);
+                }
+            }
+            
+            // Toggle generation mode
+            document.querySelectorAll('input[name="generation-mode"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    const generatePromptsBtn = document.getElementById('generate-prompts');
+                    const generateSchemaBtn = document.getElementById('generate-schema');
+                    
+                    // Reset buttons
+                    generatePromptsBtn.disabled = true;
+                    generateSchemaBtn.disabled = true;
+                    
+                    if (this.value === 'prompts-only') {
+                        generatePromptsBtn.disabled = false;
+                        
+                        // Check if we have scenario description and actors
+                        const scenarioName = document.getElementById('scenario-name').value;
+                        const scenarioDesc = document.getElementById('scenario-desc').value;
+                        const hasActors = actors.length > 0;
+                        
+                        if (!scenarioDesc || !hasActors) {
+                            const statusEl = document.getElementById('generation-status');
+                            statusEl.textContent = "Please add actors and a scenario description first";
+                            statusEl.className = "status-message error";
+                            generatePromptsBtn.disabled = true;
+                        }
+                    } else if (this.value === 'full-schema') {
+                        generateSchemaBtn.disabled = false;
+                        
+                        // Check if we have a scenario description
+                        const scenarioDesc = document.getElementById('scenario-desc').value;
+                        
+                        if (!scenarioDesc) {
+                            const statusEl = document.getElementById('generation-status');
+                            statusEl.textContent = "Please provide a scenario description first";
+                            statusEl.className = "status-message error";
+                            generateSchemaBtn.disabled = true;
+                        }
+                    }
+                });
+            });
+            
+            // Generate prompts button
+            document.getElementById('generate-prompts').addEventListener('click', function() {
+                generateSystemPrompts();
+            });
+            
+            // Generate schema button
+            document.getElementById('generate-schema').addEventListener('click', function() {
+                generateFullSchema();
+            });
+            
+            // Generate full schema from scenario description
+            function generateFullSchema() {
+                const apiKey = document.getElementById('api-key').value.trim();
+                if (!apiKey) {
+                    // Ask for API key if not provided
+                    const savedApiKey = localStorage.getItem('gemini_api_key');
+                    if (savedApiKey) {
+                        document.getElementById('api-key').value = savedApiKey;
+                        generateFullSchema();  // retry with saved key
+                        return;
+                    }
+                    
+                    showApiKeyDialog("API key is required to generate schema", () => {
+                        generateFullSchema();  // retry after dialog
+                    });
+                    return;
+                }
+                
+                const statusEl = document.getElementById('generation-status');
+                statusEl.textContent = "Generating complete schema...";
+                statusEl.className = "status-message loading";
+                
+                const scenarioName = document.getElementById('scenario-name').value || 'Untitled Scenario';
+                const scenarioDesc = document.getElementById('scenario-desc').value || '';
+                
+                if (!scenarioDesc) {
+                    statusEl.textContent = "Please provide a scenario description";
+                    statusEl.className = "status-message error";
+                    return;
+                }
+                
+                // Call the API to generate schema
+                fetch('/api/generate-schema', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: scenarioName,
+                        description: scenarioDesc,
+                        api_key: apiKey
+                    })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        // Store API key for future use
+                        localStorage.setItem('gemini_api_key', apiKey);
+                        
+                        // Clear existing elements
+                        clearWorkflow();
+                        
+                        // Import the generated schema
+                        importGeneratedSchema(data.schema);
+                        
+                        statusEl.textContent = `Successfully generated schema with ${data.schema.actors.length} actors and ${data.schema.interactions.length} interactions`;
+                        statusEl.className = "status-message success";
+                    } else {
+                        statusEl.textContent = `Error: ${data.error || 'Unknown error'}`;
+                        statusEl.className = "status-message error";
+                    }
+                })
+                .catch(err => {
+                    console.error('Error generating schema:', err);
+                    statusEl.textContent = `Error: ${err.message}`;
+                    statusEl.className = "status-message error";
+                });
+            }
+            
+            // Clear the current workflow
+            function clearWorkflow() {
+                // Remove all actors
+                while (actors.length > 0) {
+                    removeActor(actors[0].id);
+                }
+                
+                // Remove all groups
+                while (groups.length > 0) {
+                    removeGroup(groups[0].id);
+                }
+                
+                // Reset lists
+                actors = [];
+                groups = [];
+                interactions = [];
+                selectedElement = null;
+                nextId = 1;
+                
+                // Clear selected element
+                updatePropertiesPanel();
+            }
+            
+            // Import a generated schema
+            function importGeneratedSchema(schema) {
+                try {
+                    // Set scenario details if not already set
+                    if (!document.getElementById('scenario-name').value) {
+                        document.getElementById('scenario-name').value = 'Generated Scenario';
+                    }
+                    
+                    // Import actors
+                    if (schema.actors && Array.isArray(schema.actors)) {
+                        schema.actors.forEach(actorData => {
+                            const actor = addActor(
+                                actorData.type,
+                                actorData.name,
+                                actorData.position ? actorData.position.x : 100,
+                                actorData.position ? actorData.position.y : 100
+                            );
+                            
+                            // Set properties
+                            actor.description = actorData.description || '';
+                            actor.systemPrompt = actorData.systemPrompt || '';
+                            actor.initialPrompt = actorData.initialPrompt || '';
+                            
+                            // Store the generated ID for interactions
+                            actor.generatedId = actorData.id;
+                            
+                            // Update the next ID to avoid conflicts
+                            const idNum = parseInt(actor.id.split('-')[1]);
+                            if (idNum >= nextId) {
+                                nextId = idNum + 1;
+                            }
+                        });
+                    }
+                    
+                    // Import interactions
+                    if (schema.interactions && Array.isArray(schema.interactions)) {
+                        schema.interactions.forEach(interactionData => {
+                            // Find the real actor IDs based on generated IDs
+                            const sourceActor = actors.find(a => a.generatedId === interactionData.source);
+                            const targetActor = actors.find(a => a.generatedId === interactionData.target);
+                            
+                            if (sourceActor && targetActor) {
+                                const interaction = {
+                                    id: `interaction-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+                                    source: sourceActor.id,
+                                    target: targetActor.id
+                                };
+                                
+                                interactions.push(interaction);
+                                createConnection(interaction);
+                            }
+                        });
+                    }
+                    
+                    // Update the interactions list
+                    updateInteractionsList();
+                    
+                } catch (err) {
+                    console.error('Error importing generated schema:', err);
+                    const statusEl = document.getElementById('generation-status');
+                    statusEl.textContent = `Error importing schema: ${err.message}`;
+                    statusEl.className = "status-message error";
+                }
+            }
+            
+            // Generate system prompts for all actors
+            function generateSystemPrompts() {
+                const apiKey = document.getElementById('api-key').value.trim();
+                if (!apiKey) {
+                    // Ask for API key if not provided
+                    const savedApiKey = localStorage.getItem('gemini_api_key');
+                    if (savedApiKey) {
+                        document.getElementById('api-key').value = savedApiKey;
+                        generateSystemPrompts();  // retry with saved key
+                        return;
+                    }
+                    
+                    showApiKeyDialog("API key is required to generate prompts", () => {
+                        generateSystemPrompts();  // retry after dialog
+                    });
+                    return;
+                }
+                
+                const statusEl = document.getElementById('generation-status');
+                statusEl.textContent = "Generating system prompts...";
+                statusEl.className = "status-message loading";
+                
+                const scenarioName = document.getElementById('scenario-name').value || 'Untitled Scenario';
+                const scenarioDesc = document.getElementById('scenario-desc').value || '';
+                
+                if (!scenarioDesc) {
+                    statusEl.textContent = "Please provide a scenario description";
+                    statusEl.className = "status-message error";
+                    return;
+                }
+                
+                if (actors.length === 0) {
+                    statusEl.textContent = "Please add actors before generating prompts";
+                    statusEl.className = "status-message error";
+                    return;
+                }
+                
+                // Call the API to generate prompts
+                fetch('/api/generate-prompts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: scenarioName,
+                        description: scenarioDesc,
+                        actors: actors.map(actor => ({
+                            id: actor.id,
+                            name: actor.name,
+                            type: actor.type,
+                            description: actor.description || ''
+                        })),
+                        api_key: apiKey
+                    })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        // Store API key for future use
+                        localStorage.setItem('gemini_api_key', apiKey);
+                        
+                        // Update actors with generated prompts
+                        data.actors.forEach(generatedActor => {
+                            const actor = actors.find(a => a.name === generatedActor.name);
+                            if (actor) {
+                                actor.systemPrompt = generatedActor.generatedSystemPrompt;
+                                // If the actor is currently selected, update the UI
+                                if (selectedElement && selectedElement.id === actor.id) {
+                                    updatePropertiesPanel();
+                                }
+                            }
+                        });
+                        
+                        statusEl.textContent = `Successfully generated system prompts for ${data.actors.length} actors`;
+                        statusEl.className = "status-message success";
+                    } else {
+                        statusEl.textContent = `Error: ${data.error || 'Unknown error'}`;
+                        statusEl.className = "status-message error";
+                    }
+                })
+                .catch(err => {
+                    console.error('Error generating prompts:', err);
+                    statusEl.textContent = `Error: ${err.message}`;
+                    statusEl.className = "status-message error";
+                });
+            }
+            
+            // Toggle human actors control panel based on simulate humans checkbox
+            document.getElementById('simulate-humans').addEventListener('change', function() {
+                const humanActorsControl = document.getElementById('human-actors-control');
+                humanActorsControl.style.display = this.checked ? 'none' : 'block';
+            });
+            
+            // Toggle simulation options
+            runSimulation.addEventListener('click', () => {
+                simulationOptions.style.display = simulationOptions.style.display === 'none' ? 'block' : 'none';
+                
+                // Update human actors control panel
+                updateHumanActorsControlList();
+                
+                // Set the initial active round button
+                const defaultRounds = parseInt(document.getElementById('rounds').value);
+                document.querySelectorAll('.round-btn').forEach(btn => {
+                    const btnRounds = parseInt(btn.getAttribute('data-rounds'));
+                    if (btnRounds === defaultRounds) {
+                        btn.classList.add('active');
+                    } else {
+                        btn.classList.remove('active');
+                    }
+                });
+            });
+            
+            // Round button selection
+            document.querySelectorAll('.round-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    // Update active button
+                    document.querySelectorAll('.round-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Set the rounds input value
+                    const rounds = this.getAttribute('data-rounds');
+                    document.getElementById('rounds').value = rounds;
+                });
+            });
+            
+            // Rounds input change
+            document.getElementById('rounds').addEventListener('change', function() {
+                // Update active button
+                const rounds = parseInt(this.value);
+                let foundMatch = false;
+                
+                document.querySelectorAll('.round-btn').forEach(btn => {
+                    const btnRounds = parseInt(btn.getAttribute('data-rounds'));
+                    if (btnRounds === rounds) {
+                        btn.classList.add('active');
+                        foundMatch = true;
+                    } else {
+                        btn.classList.remove('active');
+                    }
+                });
+                
+                // If no matching button, deactivate all buttons
+                if (!foundMatch) {
+                    document.querySelectorAll('.round-btn').forEach(btn => btn.classList.remove('active'));
+                }
+            });
+            
+            // Update human actors control list
+            function updateHumanActorsControlList() {
+                const humanActorsList = document.getElementById('human-actors-list');
+                humanActorsList.innerHTML = '';
+                
+                // Find all human actors
+                const humanActors = actors.filter(actor => actor.type === 'human');
+                
+                if (humanActors.length === 0) {
+                    humanActorsList.innerHTML = 'No human actors in this scenario';
+                    return;
+                }
+                
+                // Create checkboxes for each human actor
+                humanActors.forEach(actor => {
+                    const div = document.createElement('div');
+                    div.className = 'actor-control';
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.id = `control-${actor.id}`;
+                    checkbox.value = actor.id;
+                    
+                    const label = document.createElement('label');
+                    label.htmlFor = `control-${actor.id}`;
+                    label.textContent = actor.name;
+                    
+                    div.appendChild(checkbox);
+                    div.appendChild(label);
+                    humanActorsList.appendChild(div);
+                });
+            }
+            
+            // Run simulation
+            startSimulation.addEventListener('click', () => {
+                const apiKey = document.getElementById('api-key').value.trim();
+                if (!apiKey) {
+                    // Try to get from localStorage
+                    const savedApiKey = localStorage.getItem('gemini_api_key');
+                    if (savedApiKey) {
+                        document.getElementById('api-key').value = savedApiKey;
+                        startSimulationWithApiKey(savedApiKey);
+                        return;
+                    }
+                    
+                    showApiKeyDialog();
+                    return;
+                }
+                
+                startSimulationWithApiKey(apiKey);
+            });
+            
+            // Submit API key from dialog
+            submitApiKey.addEventListener('click', () => {
+                const apiKey = apiKeyInput.value.trim();
+                if (apiKey) {
+                    document.getElementById('api-key').value = apiKey;
+                    overlay.style.display = 'none';
+                    startSimulationWithApiKey(apiKey);
+                } else {
+                    alert('Please enter a valid API key');
+                }
+            });
+            
+            // Cancel dialog
+            cancelDialog.addEventListener('click', () => {
+                overlay.style.display = 'none';
+            });
+            
+            // Close simulation panel
+            closeSimulation.addEventListener('click', () => {
+                simulationPanel.classList.remove('active');
+                if (socket) {
+                    socket.disconnect();
+                }
+                currentSessionId = null;
+            });
+            
+            // Submit human input
+            submitHumanInput.addEventListener('click', () => {
+                const response = humanInput.value.trim();
+                if (response && currentSessionId) {
+                    // Send the response to the server
+                    fetch(`/api/human-input/${currentSessionId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ response })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Hide the input form
+                            humanInputForm.style.display = 'none';
+                            humanInput.value = '';
+                        } else {
+                            alert('Error submitting response: ' + data.error);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Error submitting human input:', err);
+                        alert('Error submitting response');
+                    });
+                }
+            });
+            
+            // Show API key dialog with custom message and callback
+            function showApiKeyDialog(message, onSuccessCallback) {
+                overlay.style.display = 'block';
+                dialogStatus.textContent = message || 'Waiting for API key...';
+                apiKeyInput.focus();
+                
+                if (onSuccessCallback) {
+                    const originalCallback = submitApiKey.onclick;
+                    submitApiKey.onclick = () => {
+                        const apiKey = apiKeyInput.value.trim();
+                        if (apiKey) {
+                            document.getElementById('api-key').value = apiKey;
+                            overlay.style.display = 'none';
+                            onSuccessCallback();
+                            submitApiKey.onclick = originalCallback;
+                        } else {
+                            alert('Please enter a valid API key');
+                        }
+                    };
+                }
+            }
+            
+            // Start simulation with API key
+            function startSimulationWithApiKey(apiKey) {
+                const rounds = parseInt(document.getElementById('rounds').value) || 2;
+                const simulateHumans = document.getElementById('simulate-humans').checked;
+                
+                // Save API key for future use
+                localStorage.setItem('gemini_api_key', apiKey);
+                
+                // Get controlled humans
+                const controlledHumans = [];
+                if (!simulateHumans) {
+                    const checkboxes = document.querySelectorAll('#human-actors-list input[type="checkbox"]:checked');
+                    checkboxes.forEach(checkbox => {
+                        controlledHumans.push(checkbox.value);
+                    });
+                }
+                
+                // Show simulation panel
+                simulationPanel.classList.add('active');
+                simulationLog.innerHTML = '';
+                addLogEntry('status', 'Initializing simulation...');
+                
+                // Reset tabs to Live View
+                document.querySelector('.simulation-tab[data-tab="live"]').click();
+                
+                // Get the configuration
+                const config = exportConfig();
+                
+                // Start the simulation
+                fetch('/api/start-simulation', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        config,
+                        api_key: apiKey,
+                        simulate_humans: simulateHumans,
+                        controlled_humans: controlledHumans,
+                        rounds
+                    })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        currentSessionId = data.session_id;
+                        initializeSocket(currentSessionId);
+                    } else {
+                        addLogEntry('error', `Error starting simulation: ${data.error}`);
+                    }
+                })
+                .catch(err => {
+                    console.error('Error starting simulation:', err);
+                    addLogEntry('error', `Error starting simulation: ${err.message}`);
+                });
+            }
+            
+            // Initialize socket connection
+            function initializeSocket(sessionId) {
+                // Initialize Socket.IO
+                socket = io.connect(window.location.origin);
+                
+                socket.on('connect', () => {
+                    console.log('Socket connected');
+                    socket.emit('join', { session_id: sessionId });
+                });
+                
+                socket.on('joined', (data) => {
+                    console.log('Joined room:', data.session_id);
+                });
+                
+                socket.on('simulation_update', (data) => {
+                    handleSimulationUpdate(data);
+                });
+                
+                socket.on('request_human_input', (data) => {
+                    showHumanInputForm(data);
+                });
+                
+                socket.on('disconnect', () => {
+                    console.log('Socket disconnected');
+                });
+                
+                socket.on('error', (error) => {
+                    console.error('Socket error:', error);
+                    addLogEntry('error', `Socket error: ${error}`);
+                });
+            }
+            
+            // Handle simulation updates
+            function handleSimulationUpdate(data) {
+                switch (data.type) {
+                    case 'round_start':
+                        addLogEntry('round', `Round ${data.round} of ${data.total_rounds}`);
+                        break;
+                    case 'interaction_start':
+                        addLogEntry('status', `Interaction: ${data.source} → ${data.target}`);
+                        break;
+                    case 'message':
+                        if (data.from && data.to) {
+                            addLogEntry('message', `${data.from} → ${data.to}: ${data.content}`);
+                        } else {
+                            addLogEntry('status', data.content);
+                        }
+                        break;
+                    case 'response':
+                        addLogEntry('response', `${data.from} → ${data.to}: ${data.content}`);
+                        break;
+                    case 'replay_message':
+                        if (data.from && data.to) {
+                            addLogEntry('message', `${data.from} → ${data.to}: ${data.content}`);
+                            
+                            // Update progress
+                            if (data.progress) {
+                                const progressText = document.getElementById('replay-progress-text');
+                                progressText.textContent = `${data.progress.current}/${data.progress.total} messages`;
+                                
+                                const progressFill = document.getElementById('replay-progress-fill');
+                                const percentage = (data.progress.current / data.progress.total) * 100;
+                                progressFill.style.width = `${percentage}%`;
+                            }
+                        }
+                        break;
+                    case 'replay_complete':
+                        addLogEntry('status', 'Replay complete');
+                        // Reset play/pause buttons
+                        document.getElementById('replay-play').style.display = 'inline-block';
+                        document.getElementById('replay-pause').style.display = 'none';
+                        break;
+                    case 'status':
+                        addLogEntry('status', data.content);
+                        break;
+                    case 'error':
+                        addLogEntry('error', data.content);
+                        break;
+                    case 'simulation_end':
+                        addLogEntry('status', data.content);
+                        break;
+                    default:
+                        addLogEntry('status', JSON.stringify(data));
+                }
+            }
+            
+            // Show human input form
+            function showHumanInputForm(data) {
+                humanInputPrompt.textContent = data.prompt;
+                humanInputForm.style.display = 'block';
+                humanInput.value = '';
+                humanInput.focus();
+                
+                // Make sure the live view tab is active
+                document.querySelector('.simulation-tab[data-tab="live"]').click();
+            }
+            
+            // Handle tab switching
+            document.querySelectorAll('.simulation-tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    // Deactivate all tabs
+                    document.querySelectorAll('.simulation-tab').forEach(t => {
+                        t.classList.remove('active');
+                    });
+                    
+                    // Hide all tab content
+                    document.querySelectorAll('.simulation-tab-content').forEach(c => {
+                        c.classList.remove('active');
+                    });
+                    
+                    // Activate clicked tab
+                    this.classList.add('active');
+                    
+                    // Show corresponding content
+                    const tabName = this.getAttribute('data-tab');
+                    document.getElementById(`tab-${tabName}`).classList.add('active');
+                    
+                    // If history tab, load conversation history
+                    if (tabName === 'history' && currentSessionId) {
+                        loadConversationHistory();
+                    }
+                    
+                    // If direct input tab, setup the direct input form
+                    if (tabName === 'direct' && currentSessionId) {
+                        setupDirectInputForm();
+                    }
+                });
+            });
+            
+            // Load conversation history
+            function loadConversationHistory() {
+                if (!currentSessionId) return;
+                
+                fetch(`/api/conversation-history/${currentSessionId}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Populate conversation selector
+                            const selector = document.getElementById('conversation-pair');
+                            selector.innerHTML = '';
+                            
+                            Object.entries(data.history).forEach(([key, convo]) => {
+                                const option = document.createElement('option');
+                                option.value = key;
+                                option.textContent = `${convo.source} → ${convo.target}`;
+                                selector.appendChild(option);
+                            });
+                            
+                            // Display first conversation if available
+                            if (Object.keys(data.history).length > 0) {
+                                displayConversation(data.history[Object.keys(data.history)[0]]);
+                                
+                                // Setup change event
+                                selector.addEventListener('change', function() {
+                                    const selectedKey = this.value;
+                                    displayConversation(data.history[selectedKey]);
+                                });
+                            }
+                        } else {
+                            console.error('Error loading conversation history:', data.error);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Error fetching conversation history:', err);
+                    });
+            }
+            
+            // Display a specific conversation
+            function displayConversation(conversation) {
+                const historyContainer = document.getElementById('conversation-history');
+                historyContainer.innerHTML = '';
+                
+                // Create conversation container
+                const convoContainer = document.createElement('div');
+                convoContainer.className = 'conversation-container';
+                
+                conversation.messages.forEach(msg => {
+                    const bubble = document.createElement('div');
+                    bubble.className = `message-bubble ${msg.role === conversation.source ? 'sender' : 'receiver'}`;
+                    
+                    const header = document.createElement('div');
+                    header.className = 'message-header';
+                    header.textContent = msg.role;
+                    
+                    const content = document.createElement('div');
+                    content.className = 'message-content';
+                    content.textContent = msg.content;
+                    
+                    bubble.appendChild(header);
+                    bubble.appendChild(content);
+                    convoContainer.appendChild(bubble);
+                });
+                
+                historyContainer.appendChild(convoContainer);
+            }
+            
+            // Setup direct input form
+            function setupDirectInputForm() {
+                const controlledHumansList = document.getElementById('controlled-humans-list');
+                const directInput = document.getElementById('direct-input');
+                const sourceSelect = document.getElementById('direct-input-source');
+                const targetSelect = document.getElementById('direct-input-target');
+                
+                // Check if there are controlled humans
+                const checkboxes = document.querySelectorAll('#human-actors-list input[type="checkbox"]:checked');
+                
+                if (checkboxes.length === 0) {
+                    controlledHumansList.innerHTML = 'No human actors selected for direct control';
+                    directInput.classList.remove('active');
+                    return;
+                }
+                
+                // Display controlled humans
+                controlledHumansList.innerHTML = '';
+                const humanActors = [];
+                
+                checkboxes.forEach(checkbox => {
+                    const actorId = checkbox.value;
+                    const actor = actors.find(a => a.id === actorId);
+                    
+                    if (actor) {
+                        humanActors.push(actor);
+                        const div = document.createElement('div');
+                        div.textContent = actor.name;
+                        controlledHumansList.appendChild(div);
+                    }
+                });
+                
+                if (humanActors.length > 0) {
+                    // Show direct input form
+                    directInput.classList.add('active');
+                    
+                    // Populate source select (controlled humans)
+                    sourceSelect.innerHTML = '';
+                    humanActors.forEach(actor => {
+                        const option = document.createElement('option');
+                        option.value = actor.id;
+                        option.textContent = actor.name;
+                        sourceSelect.appendChild(option);
+                    });
+                    
+                    // Populate target select (possible interaction targets)
+                    updateTargetSelect();
+                    
+                    // Update target select when source changes
+                    sourceSelect.addEventListener('change', updateTargetSelect);
+                    
+                    // Setup send message button
+                    document.getElementById('send-direct-message').addEventListener('click', sendDirectMessage);
+                }
+                
+                function updateTargetSelect() {
+                    const sourceId = sourceSelect.value;
+                    const possibleTargets = [];
+                    
+                    // Find all actors that the source can send messages to
+                    interactions.forEach(interaction => {
+                        if (interaction.source === sourceId) {
+                            const target = actors.find(a => a.id === interaction.target);
+                            if (target) {
+                                possibleTargets.push(target);
+                            }
+                        }
+                    });
+                    
+                    // Populate target select
+                    targetSelect.innerHTML = '';
+                    possibleTargets.forEach(actor => {
+                        const option = document.createElement('option');
+                        option.value = actor.id;
+                        option.textContent = actor.name;
+                        targetSelect.appendChild(option);
+                    });
+                }
+                
+                function sendDirectMessage() {
+                    const sourceId = sourceSelect.value;
+                    const targetId = targetSelect.value;
+                    const message = document.getElementById('direct-input-message').value.trim();
+                    
+                    if (!sourceId || !targetId || !message) {
+                        alert('Please select source, target, and enter a message');
+                        return;
+                    }
+                    
+                    // Send the direct message to the server
+                    fetch(`/api/direct-message/${currentSessionId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            source_id: sourceId,
+                            target_id: targetId,
+                            message: message
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Clear the input field
+                            document.getElementById('direct-input-message').value = '';
+                            
+                            // Add a log entry in the live view
+                            const sourceName = sourceSelect.options[sourceSelect.selectedIndex].text;
+                            const targetName = targetSelect.options[targetSelect.selectedIndex].text;
+                            
+                            // Switch to live view to see the message and response
+                            document.querySelector('.simulation-tab[data-tab="live"]').click();
+                            
+                            addLogEntry('message', `${sourceName} → ${targetName}: ${message}`);
+                            addLogEntry('response', `${targetName} → ${sourceName}: ${data.response}`);
+                        } else {
+                            alert(`Error sending message: ${data.error}`);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Error sending direct message:', err);
+                        alert(`Error sending message: ${err.message}`);
+                    });
+                }
+            }
+            
+            // Refresh history button
+            document.getElementById('refresh-history').addEventListener('click', loadConversationHistory);
+            
+            // Activate replay controls
+            function activateReplayControls(totalMessages) {
+                const replayControls = document.getElementById('replay-controls');
+                replayControls.classList.add('active');
+                
+                // Update progress text
+                const progressText = document.getElementById('replay-progress-text');
+                progressText.textContent = `0/${totalMessages} messages`;
+                
+                // Reset progress bar
+                const progressFill = document.getElementById('replay-progress-fill');
+                progressFill.style.width = '0%';
+                
+                // Setup replay buttons
+                const stepButton = document.getElementById('replay-step');
+                const playButton = document.getElementById('replay-play');
+                const pauseButton = document.getElementById('replay-pause');
+                const resetButton = document.getElementById('replay-reset');
+                const speedSelect = document.getElementById('replay-speed-select');
+                
+                let isPlaying = false;
+                let playInterval = null;
+                
+                // Step button - play one message at a time
+                stepButton.addEventListener('click', () => {
+                    if (isPlaying) {
+                        pauseReplay();
+                    }
+                    replayStep();
+                });
+                
+                // Play button - automated playback
+                playButton.addEventListener('click', () => {
+                    if (!isPlaying) {
+                        startReplay();
+                    }
+                });
+                
+                // Pause button
+                pauseButton.addEventListener('click', () => {
+                    if (isPlaying) {
+                        pauseReplay();
+                    }
+                });
+                
+                // Reset button
+                resetButton.addEventListener('click', () => {
+                    resetReplay();
+                });
+                
+                // Start replay
+                function startReplay() {
+                    isPlaying = true;
+                    playButton.style.display = 'none';
+                    pauseButton.style.display = 'inline-block';
+                    
+                    const speed = parseFloat(speedSelect.value);
+                    
+                    // Use the server-side auto-replay
+                    fetch(`/api/replay-auto/${currentSessionId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            speed: speed
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (!data.success) {
+                            pauseReplay();
+                            alert(`Error starting replay: ${data.error}`);
+                        }
+                    })
+                    .catch(err => {
+                        pauseReplay();
+                        console.error('Error starting replay:', err);
+                        alert(`Error starting replay: ${err.message}`);
+                    });
+                }
+                
+                // Pause replay
+                function pauseReplay() {
+                    isPlaying = false;
+                    playButton.style.display = 'inline-block';
+                    pauseButton.style.display = 'none';
+                    
+                    if (playInterval) {
+                        clearInterval(playInterval);
+                        playInterval = null;
+                    }
+                }
+                
+                // Reset replay
+                function resetReplay() {
+                    pauseReplay();
+                    
+                    fetch(`/api/replay-reset/${currentSessionId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Reset progress bar and text
+                            updateReplayProgress(0, data.progress.total);
+                            
+                            // Clear the log
+                            simulationLog.innerHTML = '';
+                            addLogEntry('status', 'Replay reset to beginning');
+                            
+                            // Switch to Live View tab
+                            document.querySelector('.simulation-tab[data-tab="live"]').click();
+                        } else {
+                            alert(`Error resetting replay: ${data.error}`);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Error resetting replay:', err);
+                        alert(`Error resetting replay: ${err.message}`);
+                    });
+                }
+                
+                // Play one step
+                function replayStep() {
+                    fetch(`/api/replay-step/${currentSessionId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            if (data.done) {
+                                // Replay complete
+                                pauseReplay();
+                                addLogEntry('status', 'Replay complete');
+                            } else {
+                                // Update progress
+                                updateReplayProgress(data.progress.current, data.progress.total);
+                                
+                                // Switch to Live View tab
+                                document.querySelector('.simulation-tab[data-tab="live"]').click();
+                            }
+                        } else {
+                            pauseReplay();
+                            alert(`Error stepping replay: ${data.error}`);
+                        }
+                    })
+                    .catch(err => {
+                        pauseReplay();
+                        console.error('Error stepping replay:', err);
+                        alert(`Error stepping replay: ${err.message}`);
+                    });
+                }
+                
+                // Update progress display
+                function updateReplayProgress(current, total) {
+                    const progressText = document.getElementById('replay-progress-text');
+                    progressText.textContent = `${current}/${total} messages`;
+                    
+                    const progressFill = document.getElementById('replay-progress-fill');
+                    const percentage = (current / total) * 100;
+                    progressFill.style.width = `${percentage}%`;
+                }
+                
+                // Register a handler for replay messages
+                socket.on('replay_message', (data) => {
+                    updateReplayProgress(data.progress.current, data.progress.total);
+                });
+                
+                // Handle replay complete event
+                socket.on('replay_complete', (data) => {
+                    pauseReplay();
+                    addLogEntry('status', 'Replay complete');
+                });
+                
+                // Switch to Live View tab
+                document.querySelector('.simulation-tab[data-tab="live"]').click();
+            }
+            
+            // Add log entry
+            function addLogEntry(type, content) {
+                const entry = document.createElement('div');
+                entry.className = `log-entry ${type}`;
+                
+                if (type === 'round') {
+                    entry.innerHTML = content;
+                } else {
+                    const contentElem = document.createElement('div');
+                    contentElem.className = 'content';
+                    contentElem.textContent = content;
+                    entry.appendChild(contentElem);
+                }
+                
+                simulationLog.appendChild(entry);
+                simulationLog.scrollTop = simulationLog.scrollHeight;
+            }
+            
+            // Export configuration as JSON
+            function exportConfig() {
+                return {
+                    name: document.getElementById('scenario-name').value || 'Unnamed Scenario',
+                    description: document.getElementById('scenario-desc').value || '',
+                    actors: actors.map(actor => ({
+                        id: actor.id,
+                        type: actor.type,
+                        name: actor.name,
+                        description: actor.description || '',
+                        systemPrompt: actor.systemPrompt || '',
+                        initialPrompt: actor.initialPrompt || '',
+                        position: {
+                            x: parseInt(actor.element.style.left),
+                            y: parseInt(actor.element.style.top)
+                        }
+                    })),
+                    groups: groups.map(group => ({
+                        id: group.id,
+                        name: group.name,
+                        position: {
+                            x: parseInt(group.element.style.left),
+                            y: parseInt(group.element.style.top)
+                        },
+                        size: {
+                            width: parseInt(group.element.style.width),
+                            height: parseInt(group.element.style.height)
+                        }
+                    })),
+                    interactions: interactions.map(interaction => ({
+                        source: interaction.source,
+                        target: interaction.target
+                    }))
+                };
+            }
+            
+            // Add actor (human or AI)
+            function addActor(type, defaultName, x, y) {
+                const id = `${type}-${nextId++}`;
+                const element = document.createElement('div');
+                element.className = `actor ${type}`;
+                element.id = id;
+                element.innerHTML = defaultName;
+                element.style.left = `${x}px`;
+                element.style.top = `${y}px`;
+                
+                const deleteBtn = document.createElement('div');
+                deleteBtn.className = 'delete-button';
+                deleteBtn.innerHTML = '×';
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    removeActor(id);
+                });
+                
+                element.appendChild(deleteBtn);
+                canvas.appendChild(element);
+                
+                const actor = {
+                    id,
+                    type,
+                    name: defaultName,
+                    description: '',
+                    systemPrompt: '',
+                    initialPrompt: '',
+                    element
+                };
+                
+                actors.push(actor);
+                
+                // Make element draggable
+                jsPlumbInstance.draggable(id, {
+                    containment: 'canvas',
+                    start: () => { isDragging = true; },
+                    stop: () => { 
+                        setTimeout(() => { isDragging = false; }, 10);
+                        jsPlumbInstance.repaintEverything();
+                    }
+                });
+                
+                // Make element selectable
+                element.addEventListener('click', () => {
+                    if (!isDragging && !isConnecting) {
+                        selectElement(actor);
+                    }
+                });
+                
+                // Configure endpoints properly
+                jsPlumbInstance.addEndpoint(id, {
+                    anchors: ["Right"], 
+                    isSource: true,
+                    isTarget: false,
+                    connector: ["Bezier", { curviness: 50 }],
+                    maxConnections: -1,
+                    connectorStyle: { stroke: "#456", strokeWidth: 2 },
+                    connectorHoverStyle: { stroke: "#c61", strokeWidth: 3 },
+                    endpointStyle: { fill: "#456", radius: 5 },
+                    endpointHoverStyle: { fill: "#c61", radius: 7 }
+                });
+                
+                jsPlumbInstance.addEndpoint(id, {
+                    anchors: ["Left"],
+                    isSource: false,
+                    isTarget: true, 
+                    maxConnections: -1,
+                    endpointStyle: { fill: "#456", radius: 5 },
+                    endpointHoverStyle: { fill: "#c61", radius: 7 }
+                });
+                
+                return actor;
+            }
+            
+            // Add group
+            function addGroup(defaultName, x, y, width, height) {
+                const id = `group-${nextId++}`;
+                const element = document.createElement('div');
+                element.className = 'group';
+                element.id = id;
+                element.style.left = `${x}px`;
+                element.style.top = `${y}px`;
+                element.style.width = `${width}px`;
+                element.style.height = `${height}px`;
+                
+                const nameElement = document.createElement('div');
+                nameElement.innerHTML = defaultName;
+                nameElement.style.position = 'absolute';
+                nameElement.style.top = '5px';
+                nameElement.style.left = '10px';
+                nameElement.style.fontWeight = 'bold';
+                
+                const deleteBtn = document.createElement('div');
+                deleteBtn.className = 'delete-button';
+                deleteBtn.innerHTML = '×';
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    removeGroup(id);
+                });
+                
+                element.appendChild(nameElement);
+                element.appendChild(deleteBtn);
+                canvas.appendChild(element);
+                
+                const group = {
+                    id,
+                    name: defaultName,
+                    element,
+                    nameElement
+                };
+                
+                groups.push(group);
+                
+                // Make group draggable
+                jsPlumbInstance.draggable(id, {
+                    containment: 'canvas',
+                    start: () => { isDragging = true; },
+                    stop: () => { 
+                        setTimeout(() => { isDragging = false; }, 10);
+                        jsPlumbInstance.repaintEverything();
+                    }
+                });
+                
+                // Make group resizable
+                element.style.resize = 'both';
+                element.style.overflow = 'hidden';
+                
+                // Make group selectable
+                element.addEventListener('click', () => {
+                    if (!isDragging) {
+                        selectElement(group);
+                    }
+                });
+                
+                return group;
+            }
+            
+            // Remove actor
+            function removeActor(id) {
+                const index = actors.findIndex(actor => actor.id === id);
+                if (index !== -1) {
+                    // Get all connections related to this actor
+                    const connections = jsPlumbInstance.getConnections({
+                        source: id
+                    }).concat(jsPlumbInstance.getConnections({
+                        target: id
+                    }));
+                    
+                    // Remove all connections
+                    connections.forEach(connection => {
+                        jsPlumbInstance.deleteConnection(connection);
+                    });
+                    
+                    // Remove all interactions involving this actor
+                    interactions = interactions.filter(
+                        interaction => interaction.source !== id && interaction.target !== id
+                    );
+                    updateInteractionsList();
+                    
+                    // Remove endpoints and element
+                    jsPlumbInstance.removeAllEndpoints(id);
+                    jsPlumbInstance.remove(id);
+                    
+                    actors.splice(index, 1);
+                    
+                    if (selectedElement && selectedElement.id === id) {
+                        selectedElement = null;
+                        updatePropertiesPanel();
+                    }
+                }
+            }
+            
+            // Remove group
+            function removeGroup(id) {
+                const index = groups.findIndex(group => group.id === id);
+                if (index !== -1) {
+                    jsPlumbInstance.remove(id);
+                    groups.splice(index, 1);
+                    
+                    if (selectedElement && selectedElement.id === id) {
+                        selectedElement = null;
+                        updatePropertiesPanel();
+                    }
+                }
+            }
+            
+            // Create a connection between two actors
+            function createConnection(interaction) {
+                const connection = jsPlumbInstance.connect({
+                    source: interaction.source,
+                    target: interaction.target,
+                    anchor: 'Continuous',
+                    overlays: [
+                        ['Arrow', { location: 1, width: 10, length: 10 }]
+                    ]
+                });
+                
+                if (connection) {
+                    interaction.connection = connection;
+                }
+            }
+            
+            // Handle connection creation by jsPlumb
+            jsPlumbInstance.bind("connection", function(info) {
+                // Get the actual actor IDs from the endpoints
+                const sourceId = info.sourceEndpoint.elementId;
+                const targetId = info.targetEndpoint.elementId;
+                
+                console.log(`Connection created from ${sourceId} to ${targetId}`);
+                
+                // Check if connection already exists
+                const existingInteraction = interactions.find(
+                    interaction => 
+                        interaction.source === sourceId && 
+                        interaction.target === targetId &&
+                        interaction.connection === info.connection
+                );
+                
+                if (!existingInteraction) {
+                    const interaction = {
+                        id: `interaction-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+                        source: sourceId,
+                        target: targetId,
+                        connection: info.connection
+                    };
+                    
+                    interactions.push(interaction);
+                    updateInteractionsList();
+                }
+            });
+
+            // Replace the Connection deletion binding:
+            jsPlumbInstance.bind("connectionDetached", function(info) {
+                const sourceId = info.source.id || (info.source.parentElement ? info.source.parentElement.id : null);
+                const targetId = info.target.id;
+                
+                if (sourceId && targetId) {
+                    // Find the interaction by connection object or by source/target IDs
+                    const index = interactions.findIndex(
+                        interaction => 
+                            interaction.connection === info.connection ||
+                            (interaction.source === sourceId && interaction.target === targetId)
+                    );
+                    
+                    if (index !== -1) {
+                        interactions.splice(index, 1);
+                        updateInteractionsList();
+                    }
+                }
+            });
+
+            
+            // Update the interactions list
+            function updateInteractionsList() {
+                interactionsList.innerHTML = '';
+                
+                interactions.forEach(interaction => {
+                    const source = actors.find(actor => actor.id === interaction.source);
+                    const target = actors.find(actor => actor.id === interaction.target);
+                    
+                    if (source && target) {
+                        const div = document.createElement('div');
+                        div.className = 'interaction';
+                        div.innerHTML = `${source.name} → ${target.name}`;
+                        
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.innerHTML = 'X';
+                        deleteBtn.addEventListener('click', () => {
+                            removeInteraction(interaction.id);
+                        });
+                        
+                        div.appendChild(deleteBtn);
+                        interactionsList.appendChild(div);
+                    }
+                });
+            }
+            
+            // Remove an interaction
+            function removeInteraction(id) {
+                const index = interactions.findIndex(interaction => interaction.id === id);
+                if (index !== -1) {
+                    // Store connection reference before removing from array
+                    const connection = interactions[index].connection;
+                    
+                    // Remove from array first
+                    interactions.splice(index, 1);
+                    
+                    // Then detach the connection from jsPlumb
+                    if (connection) {
+                        jsPlumbInstance.deleteConnection(connection);
+                    }
+                    
+                    // Update UI
+                    updateInteractionsList();
+                }
+            }
+            
+            // Select an element (actor or group)
+            function selectElement(element) {
+                // Deselect previous element
+                if (selectedElement && selectedElement.element) {
+                    selectedElement.element.classList.remove('selected');
+                }
+                
+                selectedElement = element;
+                
+                if (element) {
+                    element.element.classList.add('selected');
+                }
+                
+                updatePropertiesPanel();
+            }
+            
+            // Update properties panel based on selected element
+            function updatePropertiesPanel() {
+                propertiesPanel.innerHTML = '';
+                
+                if (!selectedElement) {
+                    propertiesPanel.innerHTML = '<p>Select an element to edit its properties</p>';
+                    return;
+                }
+                
+                if (selectedElement.type === 'human' || selectedElement.type === 'ai') {
+                    // Actor properties
+                    const nameLabel = document.createElement('label');
+                    nameLabel.textContent = 'Name:';
+                    propertiesPanel.appendChild(nameLabel);
+                    
+                    const nameInput = document.createElement('input');
+                    nameInput.type = 'text';
+                    nameInput.value = selectedElement.name;
+                    nameInput.addEventListener('change', () => {
+                        selectedElement.name = nameInput.value;
+                        selectedElement.element.innerHTML = nameInput.value;
+                        // Re-add the delete button
+                        const deleteBtn = document.createElement('div');
+                        deleteBtn.className = 'delete-button';
+                        deleteBtn.innerHTML = '×';
+                        deleteBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            removeActor(selectedElement.id);
+                        });
+                        selectedElement.element.appendChild(deleteBtn);
+                        updateInteractionsList();
+                    });
+                    propertiesPanel.appendChild(nameInput);
+                    
+                    const descLabel = document.createElement('label');
+                    descLabel.textContent = 'Description:';
+                    propertiesPanel.appendChild(descLabel);
+                    
+                    const descInput = document.createElement('textarea');
+                    descInput.value = selectedElement.description || '';
+                    descInput.addEventListener('change', () => {
+                        selectedElement.description = descInput.value;
+                    });
+                    propertiesPanel.appendChild(descInput);
+                    
+                    const promptLabel = document.createElement('label');
+                    promptLabel.textContent = 'System Prompt:';
+                    propertiesPanel.appendChild(promptLabel);
+                    
+                    const promptInput = document.createElement('textarea');
+                    promptInput.value = selectedElement.systemPrompt || '';
+                    promptInput.addEventListener('change', () => {
+                        selectedElement.systemPrompt = promptInput.value;
+});
+                    propertiesPanel.appendChild(promptInput);
+                    
+                    // If auto-generation is enabled and there is a generated prompt, show it as a preview
+                    if (document.querySelector('input[name="generation-mode"]:checked') && 
+                        (document.querySelector('input[name="generation-mode"]:checked').value === 'prompts-only' ||
+                         document.querySelector('input[name="generation-mode"]:checked').value === 'full-schema') && 
+                        selectedElement.systemPrompt) {
+                        const previewDiv = document.createElement('div');
+                        previewDiv.className = 'prompt-preview';
+                        previewDiv.textContent = selectedElement.systemPrompt;
+                        propertiesPanel.appendChild(previewDiv);
+                    }
+                    
+                    const initialPromptLabel = document.createElement('label');
+                    initialPromptLabel.textContent = 'Initial Prompt (if this actor initiates):';
+                    propertiesPanel.appendChild(initialPromptLabel);
+                    
+                    const initialPromptInput = document.createElement('textarea');
+                    initialPromptInput.value = selectedElement.initialPrompt || '';
+                    initialPromptInput.addEventListener('change', () => {
+                        selectedElement.initialPrompt = initialPromptInput.value;
+                    });
+                    propertiesPanel.appendChild(initialPromptInput);
+                } else if (selectedElement.element.classList.contains('group')) {
+                    // Group properties
+                    const nameLabel = document.createElement('label');
+                    nameLabel.textContent = 'Group Name:';
+                    propertiesPanel.appendChild(nameLabel);
+                    
+                    const nameInput = document.createElement('input');
+                    nameInput.type = 'text';
+                    nameInput.value = selectedElement.name;
+                    nameInput.addEventListener('change', () => {
+                        selectedElement.name = nameInput.value;
+                        selectedElement.nameElement.innerHTML = nameInput.value;
+                    });
+                    propertiesPanel.appendChild(nameInput);
+                    
+                    // Color selection for group
+                    const colorLabel = document.createElement('label');
+                    colorLabel.textContent = 'Background Color:';
+                    propertiesPanel.appendChild(colorLabel);
+                    
+                    const colorInput = document.createElement('input');
+                    colorInput.type = 'color';
+                    colorInput.value = selectedElement.element.style.backgroundColor || '#ffffff';
+                    colorInput.addEventListener('change', () => {
+                        selectedElement.element.style.backgroundColor = colorInput.value;
+                    });
+                    propertiesPanel.appendChild(colorInput);
+                    
+                    // Opacity for group
+                    const opacityLabel = document.createElement('label');
+                    opacityLabel.textContent = 'Opacity (0-100%):';
+                    propertiesPanel.appendChild(opacityLabel);
+                    
+                    const opacityInput = document.createElement('input');
+                    opacityInput.type = 'range';
+                    opacityInput.min = '0';
+                    opacityInput.max = '100';
+                    opacityInput.value = selectedElement.element.style.opacity ? selectedElement.element.style.opacity * 100 : '70';
+                    opacityInput.addEventListener('input', () => {
+                        selectedElement.element.style.opacity = opacityInput.value / 100;
+                    });
+                    propertiesPanel.appendChild(opacityInput);
+                }
+            }
+            
+            // Initialize the canvas when the page loads
+            jsPlumbInstance.ready(function() {
+                console.log('jsPlumb is ready');
+                
+                // Check URL for schema data (for embedded usage)
+                const urlParams = new URLSearchParams(window.location.search);
+                const schemaData = urlParams.get('schema');
+                
+                if (schemaData) {
+                    try {
+                        const schema = JSON.parse(decodeURIComponent(schemaData));
+                        importSchema(schema);
+                    } catch (err) {
+                        console.error('Error parsing schema from URL:', err);
+                    }
+                }
+            });
+        });
+
+        // Add a utility function for debugging connection issues
+        function debugConnectionState() {
+            console.log("Current Interactions:", interactions);
+            console.log("Current Connections:", jsPlumbInstance.getConnections());
+            console.log("Current Actors:", actors);
+        }
+
+        // You can call this function from the browser console if needed
+        window.debugConnectionState = debugConnectionState;
+    </script>
+</body>
+</html>
