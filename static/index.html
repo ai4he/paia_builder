@@ -6,6 +6,7 @@
     <title>PAIA Workflow Designer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jsPlumb/2.15.6/js/jsplumb.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -2580,8 +2581,12 @@
             });
 
             
-            // Update the interactions list
+            /**
+             * Re-renders the list of interactions, attaching data attributes for drag-and-drop.
+             * After rendering, we re-initialize Sortable so that the user can drag to reorder.
+             */
             function updateInteractionsList() {
+                const interactionsList = document.getElementById('interactions-list');
                 interactionsList.innerHTML = '';
                 
                 interactions.forEach(interaction => {
@@ -2589,18 +2594,64 @@
                     const target = actors.find(actor => actor.id === interaction.target);
                     
                     if (source && target) {
+                        // Create a container for each interaction row
                         const div = document.createElement('div');
                         div.className = 'interaction';
-                        div.innerHTML = `${source.name} → ${target.name}`;
                         
-                        const deleteBtn = document.createElement('button');
-                        deleteBtn.innerHTML = 'X';
+                        // Attach a data-id so SortableJS can track the order
+                        div.setAttribute('data-id', interaction.id);
+                        
+                        div.innerHTML = `
+                            ${source.name} → ${target.name}
+                            <button class="delete-interaction">X</button>
+                        `;
+                        
+                        // Handle deletion
+                        const deleteBtn = div.querySelector('.delete-interaction');
                         deleteBtn.addEventListener('click', () => {
                             removeInteraction(interaction.id);
                         });
                         
-                        div.appendChild(deleteBtn);
                         interactionsList.appendChild(div);
+                    }
+                });
+                
+                // (Re)initialize the sortable functionality so changes to DOM are recognized
+                initSortableInteractions();
+            }
+
+            /**
+             * Called whenever the user finishes dragging an item in the interactions list.
+             * We read the new order from the DOM and reorder 'interactions' accordingly.
+             */
+            function reorderInteractions(newOrder) {
+                const reordered = [];
+                newOrder.forEach(interactionId => {
+                    const found = interactions.find(item => item.id === interactionId);
+                    if (found) {
+                        reordered.push(found);
+                    }
+                });
+                interactions = reordered;
+                // Re-render to confirm the new order
+                updateInteractionsList();
+            }
+
+            /**
+             * Initializes SortableJS on the #interactions-list element, reading and updating
+             * the order of 'interactions' in our global array as the user drags items.
+             */
+            function initSortableInteractions() {
+                const list = document.getElementById('interactions-list');
+                if (!list) return;
+                
+                new Sortable(list, {
+                    animation: 150,
+                    onEnd: (evt) => {
+                        // Collect the data-ids from the DOM in the new order
+                        const children = Array.from(list.children);
+                        const newOrder = children.map(child => child.getAttribute('data-id'));
+                        reorderInteractions(newOrder);
                     }
                 });
             }
