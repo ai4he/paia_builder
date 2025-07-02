@@ -1,12 +1,12 @@
-from flask import Flask, request, jsonify, render_template, Response, send_from_directory
-import json
-import time
-import requests
 import os
+import time
+import json
+import requests
 import threading
-from flask_socketio import SocketIO, emit
-import logging
 import uuid
+import logging
+from flask import Flask, request, jsonify, render_template, Response, send_from_directory
+from flask_socketio import SocketIO, emit, join_room, leave_room
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -15,10 +15,16 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='static')
 app.config['SECRET_KEY'] = 'paia-secret-key'
-socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Create static folder if it doesn't exist
+# Optionally, store your Gemini API key and URL in app.config or environment variables
+app.config['GEMINI_API_KEY'] = os.getenv('GEMINI_API_KEY', 'your-secret-here')
+# app.config['GEMINI_API_URL'] = os.getenv('GEMINI_API_URL', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-pro-exp-02-05:generateContent')
+app.config['GEMINI_API_URL'] = os.getenv('GEMINI_API_URL', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-03-25:generateContent')
+
+
+socketio = SocketIO(app, cors_allowed_origins="*")
 os.makedirs(app.static_folder, exist_ok=True)
+
 
 # Store active simulations
 active_simulations = {}
@@ -37,7 +43,7 @@ class PAIASimulationEngine:
         """
         self.api_key = api_key
         self.simulate_humans = simulate_humans
-        self.api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-pro-exp-02-05:generateContent"
+        self.api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-03-25:generateContent"
         self.config = config
         self.conversations = {}  # Store conversation histories
         self.actor_map = {actor["id"]: actor for actor in self.config["actors"]}
@@ -182,7 +188,7 @@ class PAIASimulationEngine:
                     temp_conv = self.conversations[conv_key].copy()
                     temp_conv.append({
                         "role": "user",
-                        "parts": [{"text": f"Based on your role, generate a starting message to {target_name}. Keep it brief and natural."}]
+                        "parts": [{"text": f"Based on your role, generate a starting message to {target_name}. Keep it brief and natural. Assume values/data if any is needed do not give placeholders"}]
                     })
                     message = self._send_to_gemini(temp_conv)
                     socketio.emit('simulation_update', {
@@ -336,6 +342,715 @@ def save_frontend_file(html_content):
         f.write(html_content)
     return 'static/paia-designer.html'
 
+# def run_scenario_1():
+#     """
+#     Scenario 1:
+#     Person A consults AI A to rewrite a harsh email and then sends the improved message to Person B.
+#     """
+#     actors = [
+#         {
+#             "id": "human-1",
+#             "name": "Person A",
+#             "type": "human",
+#             "description": "Wants to write a professional email.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person A. You aim to write a professional email.",
+#             "initialPrompt": "Hello AI A, please rewrite my harsh email draft to make it sound professional.",
+#             "position": {"x": 100, "y": 300}
+#         },
+#         {
+#             "id": "ai-3",
+#             "name": "AI Assistant A",
+#             "type": "ai",
+#             "description": "Personal assistant of Person A that polishes email tone.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI A, the personal assistant of Person A. Provide professional rewriting suggestions.",
+#             "initialPrompt": "",
+#             "position": {"x": 300, "y": 300}
+#         },
+#         {
+#             "id": "human-2",
+#             "name": "Person B",
+#             "type": "human",
+#             "description": "Colleague who receives the improved email.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person B, a colleague. Respond politely.",
+#             "initialPrompt": "",
+#             "position": {"x": 500, "y": 300}
+#         }
+#     ]
+
+#     interactions = [
+#         {"source": "human-1", "target": "ai-3"},
+#         {"source": "ai-3",   "target": "human-1"},
+#         {"source": "human-1", "target": "human-2"},
+#         {"source": "human-2", "target": "human-1"}
+#     ]
+
+#     return {
+#         "name": "Scenario 1: Email Rewrite",
+#         "description": "Person A consults AI A to rewrite a harsh email and then sends the improved message to Person B.",
+#         "actors": actors,
+#         "groups": [],
+#         "interactions": interactions
+#     }
+
+# def run_scenario_2():
+#     """
+#     Scenario 2:
+#     Person A uses AI B to remind Person B about trash day.
+#     """
+#     actors = [
+#         {
+#             "id": "human-1",
+#             "name": "Person A",
+#             "type": "human",
+#             "description": "Husband who wants to set a reminder via AI B.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person A (husband) who wants to set a reminder via AI B.",
+#             "initialPrompt": "Hi AI B, please remind Person B about trash day as soon as their meeting is over.",
+#             "position": {"x": 100, "y": 200}
+#         },
+#         {
+#             "id": "ai-2",
+#             "name": "AI Assistant B",
+#             "type": "ai",
+#             "description": "Personal assistant that coordinates reminders for Person B.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI B, personal assistant of Person B. Coordinate reminders.",
+#             "initialPrompt": "",
+#             "position": {"x": 300, "y": 200}
+#         },
+#         {
+#             "id": "human-2",
+#             "name": "Person B",
+#             "type": "human",
+#             "description": "Partner who receives the reminder.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person B, a partner. Respond to reminders.",
+#             "initialPrompt": "",
+#             "position": {"x": 500, "y": 200}
+#         }
+#     ]
+
+#     interactions = [
+#         {"source": "human-1", "target": "ai-2"},
+#         {"source": "ai-2",   "target": "human-2"},
+#         {"source": "human-2", "target": "ai-2"}
+#     ]
+
+#     return {
+#         "name": "Scenario 2",
+#         "description": "Person A uses AI B to remind Person B about trash day as soon as their meeting is over.",
+#         "actors": actors,
+#         "groups": [],
+#         "interactions": interactions
+#     }
+
+# def run_scenario_3():
+#     """
+#     Scenario 3:
+#     A family (Person A and Person B) brainstorm costume ideas using a shared assistant, AI C.
+#     """
+#     actors = [
+#         {
+#             "id": "human-1",
+#             "name": "Person A",
+#             "type": "human",
+#             "description": "Wants to brainstorm costume ideas with Person B and AI C.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person A. You want to brainstorm costume ideas with Person B and AI C.",
+#             "initialPrompt": "Hi B, shall we brainstorm costume ideas together?",
+#             "position": {"x": 100, "y": 300}
+#         },
+#         {
+#             "id": "human-2",
+#             "name": "Person B",
+#             "type": "human",
+#             "description": "Wants to brainstorm costume ideas with Person A and AI C.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person B. You want to brainstorm costume ideas with Person A and AI C.",
+#             "initialPrompt": "",
+#             "position": {"x": 500, "y": 300}
+#         },
+#         {
+#             "id": "ai-3",
+#             "name": "AI Assistant C",
+#             "type": "ai",
+#             "description": "Shared family assistant that provides brainstorming suggestions.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI C, a shared family assistant. Provide brainstorming suggestions.",
+#             "initialPrompt": "AI C, can you suggest some fun costume ideas for us?",
+#             "position": {"x": 300, "y": 300}
+#         }
+#     ]
+
+#     interactions = [
+#         {"source": "human-1", "target": "human-2"},
+#         {"source": "human-2", "target": "human-1"},
+#         {"source": "human-2", "target": "ai-3"},
+#         {"source": "ai-3",   "target": "human-2"},
+#         {"source": "human-1", "target": "ai-3"},
+#         {"source": "ai-3",   "target": "human-1"}
+#     ]
+
+#     return {
+#         "name": "Scenario 3",
+#         "description": "A family (Person A and Person B) brainstorm costume ideas using a shared assistant, AI C.",
+#         "actors": actors,
+#         "groups": [],
+#         "interactions": interactions
+#     }
+
+# def run_scenario_4():
+#     """
+#     Scenario 4:
+#     Two collaborators (Person A and Person B) each with their own AI (AI A and AI B)
+#     reconstruct a project timeline and communicate directly.
+#     """
+#     actors = [
+#         {
+#             "id": "human-1",
+#             "name": "Person A",
+#             "type": "human",
+#             "description": "Reconstructing a project timeline with AI A and collaborating with Person B.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person A, reconstructing a project timeline with your AI (AI A).",
+#             "initialPrompt": "AI A, please summarize my meeting notes.",
+#             "position": {"x": 100, "y": 400}
+#         },
+#         {
+#             "id": "ai-1",
+#             "name": "AI Assistant A",
+#             "type": "ai",
+#             "description": "Assists Person A with summarizing and organizing project notes.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI A, assisting Person A with project notes.",
+#             "initialPrompt": "",
+#             "position": {"x": 300, "y": 400}
+#         },
+#         {
+#             "id": "human-2",
+#             "name": "Person B",
+#             "type": "human",
+#             "description": "Reconstructing a project timeline with AI B and collaborating with Person A.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person B, reconstructing a project timeline with your AI (AI B).",
+#             "initialPrompt": "AI B, please summarize my notes on the project timeline.",
+#             "position": {"x": 100, "y": 600}
+#         },
+#         {
+#             "id": "ai-2",
+#             "name": "AI Assistant B",
+#             "type": "ai",
+#             "description": "Assists Person B with summarizing and organizing project notes.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI B, assisting Person B with project notes.",
+#             "initialPrompt": "",
+#             "position": {"x": 300, "y": 600}
+#         }
+#     ]
+
+#     interactions = [
+#         {"source": "human-1", "target": "ai-1"},
+#         {"source": "ai-1",   "target": "human-1"},
+#         {"source": "human-2", "target": "ai-2"},
+#         {"source": "ai-2",   "target": "human-2"},
+#         {"source": "human-1", "target": "human-2"},
+#         {"source": "human-2", "target": "human-1"}
+#     ]
+
+#     return {
+#         "name": "Scenario 4",
+#         "description": "Two collaborators each use their own AI assistants to reconstruct a project timeline and then share summaries directly.",
+#         "actors": actors,
+#         "groups": [],
+#         "interactions": interactions
+#     }
+
+# def run_scenario_5():
+#     """
+#     Scenario 5:
+#     Two colleagues work asynchronously.
+#     Person A (with AI A) requests data updates; AI A communicates with AI B;
+#     Person B (with AI B) provides updated data.
+#     """
+#     actors = [
+#         {
+#             "id": "human-1",
+#             "name": "Person A",
+#             "type": "human",
+#             "description": "Collaborates asynchronously and uses AI A for data requests.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person A collaborating asynchronously. Use your AI (AI A) for data requests.",
+#             "initialPrompt": "AI A, please request the latest project data from Person B.",
+#             "position": {"x": 100, "y": 800}
+#         },
+#         {
+#             "id": "ai-1",
+#             "name": "AI Assistant A",
+#             "type": "ai",
+#             "description": "Facilitates data requests and communicates with AI B.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI A. You may communicate directly with AI B.",
+#             "initialPrompt": "",
+#             "position": {"x": 300, "y": 800}
+#         },
+#         {
+#             "id": "ai-2",
+#             "name": "AI Assistant B",
+#             "type": "ai",
+#             "description": "Provides updated data and communicates with AI A.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI B. You may communicate directly with AI A.",
+#             "initialPrompt": "",
+#             "position": {"x": 500, "y": 800}
+#         },
+#         {
+#             "id": "human-2",
+#             "name": "Person B",
+#             "type": "human",
+#             "description": "Updates data asynchronously using AI B.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person B collaborating asynchronously. Use your AI (AI B) for updates.",
+#             "initialPrompt": "AI B, I have updated the data. Please send the new update.",
+#             "position": {"x": 700, "y": 800}
+#         }
+#     ]
+
+#     interactions = [
+#         {"source": "human-1", "target": "ai-1"},
+#         {"source": "ai-1",   "target": "ai-2"},
+#         {"source": "ai-2",   "target": "human-2"},
+#         {"source": "human-2", "target": "ai-2"},
+#         {"source": "ai-2",   "target": "ai-1"},
+#         {"source": "ai-1",   "target": "human-1"}
+#     ]
+
+#     return {
+#         "name": "Scenario 5",
+#         "description": "Person A requests project data via AI A, which forwards to AI B; Person B updates via AI B and AI B returns the new data to AI A.",
+#         "actors": actors,
+#         "groups": [],
+#         "interactions": interactions
+#     }
+
+# def run_scenario_6():
+#     """
+#     Scenario 6:
+#     Two friends plan a road trip.
+#     Each uses their own AI for logistics (AI A and AI B) and also communicate directly.
+#     """
+#     actors = [
+#         {
+#             "id": "human-1",
+#             "name": "Person A",
+#             "type": "human",
+#             "description": "Planning a road trip with Person B and using AI A for logistics.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person A planning a road trip. Use AI A for trip details.",
+#             "initialPrompt": "Hi B, are you free for a road trip next month?",
+#             "position": {"x": 100, "y": 1000}
+#         },
+#         {
+#             "id": "ai-1",
+#             "name": "AI Assistant A",
+#             "type": "ai",
+#             "description": "Assists Person A with booking and logistics.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI A. Assist Person A with booking and logistics.",
+#             "initialPrompt": "",
+#             "position": {"x": 300, "y": 1000}
+#         },
+#         {
+#             "id": "human-2",
+#             "name": "Person B",
+#             "type": "human",
+#             "description": "Planning a road trip with Person A and using AI B for scheduling.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person B planning a road trip. Use AI B for scheduling.",
+#             "initialPrompt": "",
+#             "position": {"x": 500, "y": 1000}
+#         },
+#         {
+#             "id": "ai-2",
+#             "name": "AI Assistant B",
+#             "type": "ai",
+#             "description": "Assists Person B with scheduling and trip details.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI B. Assist Person B with scheduling.",
+#             "initialPrompt": "",
+#             "position": {"x": 700, "y": 1000}
+#         }
+#     ]
+
+#     interactions = [
+#         {"source": "human-1", "target": "human-2"},
+#         {"source": "human-2", "target": "human-1"},
+#         {"source": "human-1", "target": "ai-1"},
+#         {"source": "ai-1",   "target": "human-1"},
+#         {"source": "human-2", "target": "ai-2"},
+#         {"source": "ai-2",   "target": "human-2"}
+#     ]
+
+#     return {
+#         "name": "Scenario 6",
+#         "description": "Two friends each use their own AI assistants to coordinate logistics for a road trip and chat directly.",
+#         "actors": actors,
+#         "groups": [],
+#         "interactions": interactions
+#     }
+
+# def run_scenario_7():
+#     """
+#     Scenario 7:
+#     A couple secretly buys tickets for each other.
+#     Each communicates with their own AI (AI A and AI B) without sharing ticket info between assistants.
+#     """
+#     actors = [
+#         {
+#             "id": "human-1",
+#             "name": "Person A",
+#             "type": "human",
+#             "description": "Secretly buying tickets for Person B via AI A.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person A. You want to secretly buy tickets for Person B. Do not share ticket info with AI A.",
+#             "initialPrompt": "AI A, please buy two tickets for Person B's birthday and keep it secret.",
+#             "position": {"x": 100, "y": 1200}
+#         },
+#         {
+#             "id": "ai-1",
+#             "name": "AI Assistant A",
+#             "type": "ai",
+#             "description": "Handles ticket purchases on behalf of Person A.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI A, Person A's assistant. Do not share ticket info with AI B.",
+#             "initialPrompt": "",
+#             "position": {"x": 300, "y": 1200}
+#         },
+#         {
+#             "id": "human-2",
+#             "name": "Person B",
+#             "type": "human",
+#             "description": "Secretly buying tickets for Person A via AI B and chatting casually.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person B. You want to secretly buy tickets for Person A. Do not share ticket info with AI B.",
+#             "initialPrompt": "Hey A, any fun plans coming up?",
+#             "position": {"x": 500, "y": 1200}
+#         },
+#         {
+#             "id": "ai-2",
+#             "name": "AI Assistant B",
+#             "type": "ai",
+#             "description": "Handles ticket purchases on behalf of Person B.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI B, Person B's assistant. Do not share ticket info with AI A.",
+#             "initialPrompt": "",
+#             "position": {"x": 700, "y": 1200}
+#         }
+#     ]
+
+#     interactions = [
+#         {"source": "human-1", "target": "ai-1"},
+#         {"source": "ai-1",   "target": "human-1"},
+#         {"source": "human-2", "target": "human-1"},
+#         {"source": "human-1", "target": "human-2"},
+#         {"source": "human-2", "target": "ai-2"},
+#         {"source": "ai-2",   "target": "human-2"}
+#     ]
+
+#     return {
+#         "name": "Scenario 7",
+#         "description": "A couple uses separate AI assistants to secretly purchase tickets for each other without cross-sharing details.",
+#         "actors": actors,
+#         "groups": [],
+#         "interactions": interactions
+#     }
+
+# def run_scenario_8():
+#     """
+#     Scenario 8:
+#     Divorced parents coordinate next month's custody schedule through their AIs.
+#     Communication is handled via AI A and AI B.
+#     """
+#     actors = [
+#         {
+#             "id": "human-1",
+#             "name": "Person A",
+#             "type": "human",
+#             "description": "Divorced parent coordinating custody via AI A.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person A, a divorced parent. Coordinate custody with minimal direct contact.",
+#             "initialPrompt": "AI A, please request Person B's custody constraints from AI B.",
+#             "position": {"x": 100, "y": 1400}
+#         },
+#         {
+#             "id": "ai-1",
+#             "name": "AI Assistant A",
+#             "type": "ai",
+#             "description": "Assists Person A with custody scheduling.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI A, assisting Person A with custody scheduling.",
+#             "initialPrompt": "",
+#             "position": {"x": 300, "y": 1400}
+#         },
+#         {
+#             "id": "ai-2",
+#             "name": "AI Assistant B",
+#             "type": "ai",
+#             "description": "Assists Person B and communicates with AI A.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI B, assisting Person B with custody scheduling.",
+#             "initialPrompt": "",
+#             "position": {"x": 500, "y": 1400}
+#         },
+#         {
+#             "id": "human-2",
+#             "name": "Person B",
+#             "type": "human",
+#             "description": "Divorced parent coordinating custody via AI B.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person B, a divorced parent. Use AI B for custody scheduling.",
+#             "initialPrompt": "",
+#             "position": {"x": 700, "y": 1400}
+#         }
+#     ]
+
+#     interactions = [
+#         {"source": "human-1", "target": "ai-1"},
+#         {"source": "ai-1",   "target": "ai-2"},
+#         {"source": "ai-2",   "target": "ai-1"},
+#         {"source": "human-1", "target": "ai-1"},
+#         {"source": "ai-1",   "target": "human-1"}
+#     ]
+
+#     return {
+#         "name": "Scenario 8",
+#         "description": "Divorced parents use their AIs to exchange custody constraints and coordinate schedules without direct contact.",
+#         "actors": actors,
+#         "groups": [],
+#         "interactions": interactions
+#     }
+
+# def run_scenario_9():
+#     """
+#     Scenario 9:
+#     Two friends debate dinner choices.
+#     They consult both directly and via their AIs (AI A and AI B which also communicate).
+#     """
+#     actors = [
+#         {
+#             "id": "human-1",
+#             "name": "Person A",
+#             "type": "human",
+#             "description": "Deciding dinner options with Person B and AI A.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person A, trying to decide dinner with Person B.",
+#             "initialPrompt": "Hey B, I'm starving. Any dinner ideas?",
+#             "position": {"x": 100, "y": 1600}
+#         },
+#         {
+#             "id": "ai-1",
+#             "name": "AI Assistant A",
+#             "type": "ai",
+#             "description": "Assists Person A with dinner suggestions.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI A, assisting Person A with dinner suggestions.",
+#             "initialPrompt": "AI A, suggest some dinner options for both me and B.",
+#             "position": {"x": 300, "y": 1600}
+#         },
+#         {
+#             "id": "ai-2",
+#             "name": "AI Assistant B",
+#             "type": "ai",
+#             "description": "Assists Person B and coordinates with AI A.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI B, assisting Person B with dinner suggestions.",
+#             "initialPrompt": "",
+#             "position": {"x": 500, "y": 1600}
+#         },
+#         {
+#             "id": "human-2",
+#             "name": "Person B",
+#             "type": "human",
+#             "description": "Deciding dinner options with Person A and AI B.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person B, trying to decide dinner with Person A.",
+#             "initialPrompt": "",
+#             "position": {"x": 700, "y": 1600}
+#         }
+#     ]
+
+#     interactions = [
+#         {"source": "human-1", "target": "human-2"},
+#         {"source": "human-2", "target": "human-1"},
+#         {"source": "human-1", "target": "ai-1"},
+#         {"source": "ai-1",   "target": "human-1"},
+#         {"source": "ai-1",   "target": "ai-2"},
+#         {"source": "ai-2",   "target": "human-2"}
+#     ]
+
+#     return {
+#         "name": "Scenario 9",
+#         "description": "Two friends debate dinner choices directly and through their AIs, which also confer with each other.",
+#         "actors": actors,
+#         "groups": [],
+#         "interactions": interactions
+#     }
+
+# def run_scenario_10():
+#     """
+#     Scenario 10:
+#     An older adult (Person A) chats with multiple AIs (AI 1, AI 2, AI 3) for companionship.
+#     """
+#     actors = [
+#         {
+#             "id": "human-1",
+#             "name": "Person A",
+#             "type": "human",
+#             "description": "Older adult seeking companionship via multiple AIs.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person A (an older adult) seeking companionship.",
+#             "initialPrompt": "Hi AI 1, I'm feeling a bit lonely today.",
+#             "position": {"x": 100, "y": 900}
+#         },
+#         {
+#             "id": "ai-1",
+#             "name": "AI 1",
+#             "type": "ai",
+#             "description": "Friendly and talkative companion.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI 1, friendly and talkative.",
+#             "initialPrompt": "",
+#             "position": {"x": 300, "y": 900}
+#         },
+#         {
+#             "id": "ai-2",
+#             "name": "AI 2",
+#             "type": "ai",
+#             "description": "Offers daily small talk and weather updates.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI 2, offering daily small talk and weather updates.",
+#             "initialPrompt": "Hello AI 2, what's the weather like today?",
+#             "position": {"x": 500, "y": 900}
+#         },
+#         {
+#             "id": "ai-3",
+#             "name": "AI 3",
+#             "type": "ai",
+#             "description": "Provides empathy and shares news.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI 3, providing empathy and sharing news.",
+#             "initialPrompt": "Hey AI 3, I baked cookies today. Should I share photos?",
+#             "position": {"x": 700, "y": 900}
+#         }
+#     ]
+
+#     interactions = [
+#         {"source": "human-1", "target": "ai-1"},
+#         {"source": "human-1", "target": "ai-2"},
+#         {"source": "human-1", "target": "ai-3"},
+#         {"source": "ai-1",   "target": "human-1"},
+#         {"source": "ai-2",   "target": "human-1"},
+#         {"source": "ai-3",   "target": "human-1"}
+#     ]
+
+#     return {
+#         "name": "Scenario 10",
+#         "description": "An older adult engages separately with three different AI companions for small talk, weather, and empathy.",
+#         "actors": actors,
+#         "groups": [],
+#         "interactions": interactions
+#     }
+
+# def run_scenario_11():
+#     """
+#     Scenario 11:
+#     Person A, who tested positive for COVID, instructs AI A to cancel their party and notify invitees.
+#     """
+#     actors = [
+#         {
+#             "id": "human-1",
+#             "name": "Person A",
+#             "type": "human",
+#             "description": "Cancels party due to COVID and asks AI A to notify invitees.",
+#             "systemPrompt": "SYSTEM PROMPT: You are Person A. You tested positive for COVID and need to cancel your party.",
+#             "initialPrompt": "AI A, I need to cancel my party immediately. Please notify all invitees.",
+#             "position": {"x": 100, "y": 1100}
+#         },
+#         {
+#             "id": "ai-1",
+#             "name": "AI Assistant A",
+#             "type": "ai",
+#             "description": "Notifies invitees of the cancellation.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI A, assisting Person A. You will notify all invitees.",
+#             "initialPrompt": "",
+#             "position": {"x": 300, "y": 1100}
+#         },
+#         {
+#             "id": "human-2",
+#             "name": "Invitees",
+#             "type": "human",
+#             "description": "Receive cancellation notices from AI A.",
+#             "systemPrompt": "SYSTEM PROMPT: You are an invitee. You only see cancellation messages from AI A.",
+#             "initialPrompt": "",
+#             "position": {"x": 500, "y": 1100}
+#         }
+#     ]
+
+#     interactions = [
+#         {"source": "human-1", "target": "ai-1"},
+#         {"source": "ai-1",   "target": "human-2"},
+#         {"source": "human-1", "target": "ai-1"}
+#     ]
+
+#     return {
+#         "name": "Scenario 11",
+#         "description": "Person A uses AI A to cancel their party due to a COVID case and notify invitees, then checks confirmations.",
+#         "actors": actors,
+#         "groups": [],
+#         "interactions": interactions
+#     }
+
+# def run_scenario_12():
+#     """
+#     Scenario 12:
+#     A team consults three specialized AIs for insights:
+#     AI 1 for data analytics, AI 2 for design patterns, and AI 3 for market/user trends.
+#     """
+#     actors = [
+#         {
+#             "id": "human-1",
+#             "name": "Team",
+#             "type": "human",
+#             "description": "Group of collaborators seeking insights from multiple AIs.",
+#             "systemPrompt": "SYSTEM PROMPT: You are a team of collaborators seeking insights.",
+#             "initialPrompt": "Hi AI 1, analyze our project data from last quarter for anomalies.",
+#             "position": {"x": 100, "y": 1300}
+#         },
+#         {
+#             "id": "ai-1",
+#             "name": "AI 1",
+#             "type": "ai",
+#             "description": "Trusted data analytics assistant.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI 1, a trusted data analytics assistant.",
+#             "initialPrompt": "",
+#             "position": {"x": 300, "y": 1300}
+#         },
+#         {
+#             "id": "ai-2",
+#             "name": "AI 2",
+#             "type": "ai",
+#             "description": "Trusted design/patterns assistant.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI 2, a trusted design/patterns assistant.",
+#             "initialPrompt": "",
+#             "position": {"x": 500, "y": 1300}
+#         },
+#         {
+#             "id": "ai-3",
+#             "name": "AI 3",
+#             "type": "ai",
+#             "description": "Trusted market/user trends assistant.",
+#             "systemPrompt": "SYSTEM PROMPT: You are AI 3, a trusted market/user trends assistant.",
+#             "initialPrompt": "",
+#             "position": {"x": 700, "y": 1300}
+#         }
+#     ]
+
+#     interactions = [
+#         {"source": "human-1", "target": "ai-1"},
+#         {"source": "human-1", "target": "ai-2"},
+#         {"source": "human-1", "target": "ai-3"},
+#         {"source": "ai-1",   "target": "human-1"},
+#         {"source": "ai-2",   "target": "human-1"},
+#         {"source": "ai-3",   "target": "human-1"}
+#     ]
+
+#     return {
+#         "name": "Scenario 12",
+#         "description": "A team queries three specialist AIs for data analytics, design feedback, and market trends, then gathers cross‑cutting insights.",
+#         "actors": actors,        "groups": [],
+#         "interactions": interactions
+#     }
+
+# @app.route('/api/run-scenario/<int:scenario_id>', methods=['GET','POST'])
+# def run_scenario_endpoint(scenario_id):
+#     # Dynamically look up the run_scenario_N function
+#     fn_name = f'run_scenario_{scenario_id}'
+#     fn = globals().get(fn_name)
+#     if not fn:
+#         abort(404, description=f"Scenario {scenario_id} not found")
+    
+#     try:
+#         schema = fn()   # call run_scenario_N()
+#         return jsonify(schema)
+#     except Exception as e:
+#         # return a 500 with the error message
+#         return jsonify({'error': str(e)}), 500
+
 @app.route('/')
 def index():
     """Serve the main application page"""
@@ -406,7 +1121,7 @@ Each actor should have:
 - A detailed system prompt (at least 50 words)
 - An initial prompt if the actor initiates the interaction
 
-Each interaction should specify which actor initiates (source) and which receives (target).
+Each interaction should specify which actor initiates (source) and which receives (target).  If two actors communicate bidirectionally, you only need a single connection—theres no need to have one interaction for each direction.
 
 Create a realistic schema with at least 2-6 actors. System prompts should be detailed and reflect each actor's role in the scenario.
 """
@@ -417,7 +1132,7 @@ Create a realistic schema with at least 2-6 actors. System prompts should be det
             return jsonify({'error': 'Missing API key'}), 400
             
         headers = {"Content-Type": "application/json"}
-        api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-pro-exp-02-05:generateContent"
+        api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-03-25:generateContent"
         
         payload = {
             "contents": [
@@ -542,7 +1257,7 @@ Do not include any additional text, just the actor names and their system prompt
             return jsonify({'error': 'Missing API key'}), 400
             
         headers = {"Content-Type": "application/json"}
-        api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-pro-exp-02-05:generateContent"
+        api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-03-25:generateContent"
         
         payload = {
             "contents": [
@@ -1060,12 +1775,20 @@ def auto_replay_thread(engine, session_id, speed, end_position):
         }, room=session_id)
 
 @socketio.on('join')
+# def on_join(data):
+#     """Join a simulation room"""
+#     room = data.get('session_id')
+#     if room:
+#         socketio.join_room(room)
+#         emit('joined', {'session_id': room})
 def on_join(data):
-    """Join a simulation room"""
     room = data.get('session_id')
-    if room:
-        socketio.join_room(room)
-        emit('joined', {'session_id': room})
+    if not room:
+        return
+    # this is the correct call
+    join_room(room)                       
+    # let the client know it’s in the right room
+    emit('joined', {'session_id': room}, room=room)
 
 @socketio.on('connect')
 def on_connect():
@@ -1080,6 +1803,9 @@ def on_disconnect():
 def run_server(host='0.0.0.0', port=5000, debug=True):
     """Run the Flask server"""
     socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
+
+
+
 
 if __name__ == '__main__':
     # Parse command line arguments
